@@ -124,7 +124,7 @@ ELLM_MAX_GENERATION_TOKENS=16 \
 cargo run --release --bin ellm_agent_server
 ```
 
-The official loader reads `config.json`, `tokenizer.json`, `tokenizer_config.json` / `chat_template.jinja`, `model.safetensors.index.json`, and all sharded `*.safetensors` files. It normalizes the official `model.language_model.*` tensor prefix and the `mlp.experts.down_proj` naming used by Qwen3.6-35B-A3B before injecting weights into the runtime. The full 35B-A3B checkpoint is about 72 GB of safetensors before runtime/KV overhead, so it requires a machine with substantially more memory than a 32 GB laptop.
+The official loader reads `config.json`, `tokenizer.json`, `tokenizer_config.json` / `chat_template.jinja`, `model.safetensors.index.json`, and all sharded `*.safetensors` files. It normalizes the official `model.language_model.*` tensor prefix and the `mlp.experts.down_proj` naming used by Qwen3.6-35B-A3B before injecting weights into the runtime. The full 35B-A3B checkpoint is about 72 GB of safetensors before runtime/KV overhead, so it requires a machine with substantially more memory than a 32 GB laptop. Startup performs a memory preflight and fails before loading weights when the estimated FP16/BF16 runtime requirement exceeds system memory.
 
 This eLLM path currently loads official FP16/BF16/F32 safetensors into the CPU runtime. Quantized 4-bit MLX/GGUF/AWQ/GPTQ checkpoints are not interchangeable with this loader and require separate packed-weight kernels before they can be served by eLLM itself.
 

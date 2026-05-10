@@ -384,6 +384,7 @@ impl OfficialRuntime {
         let max_context = max_context
             .max(1)
             .min(artifacts.config.max_position_embeddings.max(1));
+        ensure_official_runtime_memory(&artifacts, max_context)?;
         let weights = artifacts.load_normalized_weights_f16()?;
         let mut model = Model::<f16>::new_with_parameters(
             &artifacts.config,
@@ -514,6 +515,120 @@ impl OfficialRuntime {
 
         Ok(generated)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SystemMemory {
+    total_bytes: u64,
+    available_bytes: Option<u64>,
+}
+
+fn ensure_official_runtime_memory(artifacts: &Qwen36Artifacts, max_context: usize) -> Result<()> {
+    if matches!(
+        std::env::var("ELLM_SKIP_MEMORY_PREFLIGHT").as_deref(),
+        Ok("1" | "true" | "TRUE" | "yes" | "YES")
+    ) {
+        return Ok(());
+    }
+
+    let weight_bytes = artifacts.estimated_runtime_weight_bytes_f16()?;
+    let required_bytes =
+        estimate_official_runtime_required_bytes(weight_bytes, &artifacts.config, max_context);
+    let Some(memory) = system_memory_bytes() else {
+        return Ok(());
+    };
+    let capacity_bytes = memory.available_bytes.unwrap_or(memory.total_bytes);
+
+    if capacity_bytes >= required_bytes {
+        return Ok(());
+    }
+
+    let capacity_label = if let Some(available_bytes) = memory.available_bytes {
+        format!(
+            "available memory {} (system total {})",
+            format_gib(available_bytes),
+            format_gib(memory.total_bytes)
+        )
+    } else {
+        format!("system memory {}", format_gib(memory.total_bytes))
+    };
+
+    Err(anyhow!(
+        "not enough memory for eLLM's official Qwen3.6 FP16/BF16 CPU runtime: \
+         estimated f16 weight storage {}, estimated startup requirement {}, but this machine has {}. \
+         Use a smaller official FP/BF checkpoint, a larger RAM system, or implement eLLM-native \
+         quantized kernels for 4-bit/8-bit checkpoints. Set ELLM_SKIP_MEMORY_PREFLIGHT=1 only if \
+         you know the model fits.",
+        format_gib(weight_bytes),
+        format_gib(required_bytes),
+        capacity_label
+    ))
+}
+
+fn estimate_official_runtime_required_bytes(
+    weight_bytes: u64,
+    config: &Config,
+    max_context: usize,
+) -> u64 {
+    let hidden_working_set = (max_context as u64)
+        .saturating_mul(config.hidden_size as u64)
+        .saturating_mul(std::mem::size_of::<f16>() as u64)
+        .saturating_mul(config.num_hidden_layers.saturating_add(8) as u64);
+
+    weight_bytes
+        .saturating_add(weight_bytes / 4)
+        .saturating_add(hidden_working_set)
+}
+
+fn format_gib(bytes: u64) -> String {
+    format!("{:.1} GiB", bytes as f64 / 1024.0 / 1024.0 / 1024.0)
+}
+
+#[cfg(target_os = "linux")]
+fn system_memory_bytes() -> Option<SystemMemory> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let total_bytes = parse_meminfo_kib(&meminfo, "MemTotal")?.saturating_mul(1024);
+    let available_bytes = parse_meminfo_kib(&meminfo, "MemAvailable").map(|kib| kib * 1024);
+    Some(SystemMemory {
+        total_bytes,
+        available_bytes,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn parse_meminfo_kib(meminfo: &str, key: &str) -> Option<u64> {
+    meminfo.lines().find_map(|line| {
+        let (name, rest) = line.split_once(':')?;
+        if name != key {
+            return None;
+        }
+        rest.split_whitespace().next()?.parse::<u64>().ok()
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn system_memory_bytes() -> Option<SystemMemory> {
+    let output = std::process::Command::new("sysctl")
+        .args(["-n", "hw.memsize"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let total_bytes = String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()?;
+    Some(SystemMemory {
+        total_bytes,
+        available_bytes: None,
+    })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn system_memory_bytes() -> Option<SystemMemory> {
+    None
 }
 
 fn run_qwen36_a3b_runtime_once() -> usize {
@@ -755,6 +870,16 @@ mod tests {
         assert_eq!(response.completion_tokens, 1);
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn official_runtime_memory_estimate_rejects_oversized_models() {
+        let config = Config::from_json_str(tiny_official_config_json()).unwrap();
+        let weight_bytes = 72 * 1024 * 1024 * 1024u64;
+        let required_bytes = estimate_official_runtime_required_bytes(weight_bytes, &config, 128);
+
+        assert!(required_bytes > 32 * 1024 * 1024 * 1024u64);
+        assert!(format_gib(required_bytes).ends_with(" GiB"));
     }
 
     fn to_official_test_name(name: &str) -> String {

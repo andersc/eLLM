@@ -119,6 +119,24 @@ impl SafeTensorsLoader {
         Ok(infos)
     }
 
+    pub fn estimated_f16_weight_bytes(&self) -> Result<u64> {
+        self.tensor_infos()?
+            .iter()
+            .try_fold(0u64, |total, tensor| {
+                let elements = tensor.shape.iter().try_fold(1u64, |product, dim| {
+                    product
+                        .checked_mul(*dim as u64)
+                        .ok_or_else(|| anyhow!("tensor shape is too large: {}", tensor.name))
+                })?;
+                let bytes = elements
+                    .checked_mul(std::mem::size_of::<f16>() as u64)
+                    .ok_or_else(|| anyhow!("tensor is too large: {}", tensor.name))?;
+                total
+                    .checked_add(bytes)
+                    .ok_or_else(|| anyhow!("model is too large to estimate f16 weight bytes"))
+            })
+    }
+
     pub fn load_all_weights_f16(&self) -> Result<HashMap<String, Vec<f16>>> {
         self.load_weights_f16(None)
     }
@@ -255,6 +273,7 @@ mod tests {
 
         let loader = SafeTensorsLoader::new(&dir).unwrap();
         assert_eq!(loader.model_files(), &["model-00001-of-00001.safetensors"]);
+        assert_eq!(loader.estimated_f16_weight_bytes().unwrap(), 12);
 
         let weights = loader
             .load_selected_weights_f16(["lm_head.weight".to_string()])

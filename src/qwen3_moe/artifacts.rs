@@ -131,6 +131,29 @@ impl Qwen36Artifacts {
         Ok(normalized)
     }
 
+    pub fn estimated_runtime_weight_bytes_f16(&self) -> Result<u64> {
+        let mut bytes = self.safetensors.estimated_f16_weight_bytes()?;
+
+        if self.config.tie_word_embeddings {
+            let has_lm_head = self.safetensors.tensor_infos()?.iter().any(|tensor| {
+                normalize_qwen36_weight_name(&tensor.name) == "lm_head.weight"
+            });
+            if !has_lm_head {
+                let tied_embedding_bytes = self
+                    .config
+                    .vocab_size
+                    .checked_mul(self.config.hidden_size)
+                    .and_then(|elements| elements.checked_mul(std::mem::size_of::<f16>()))
+                    .ok_or_else(|| anyhow!("tied embedding tensor is too large"))?;
+                bytes = bytes
+                    .checked_add(tied_embedding_bytes as u64)
+                    .ok_or_else(|| anyhow!("model is too large to estimate runtime weight bytes"))?;
+            }
+        }
+
+        Ok(bytes)
+    }
+
     pub fn expected_parameter_specs(&self) -> Vec<ParameterSpec> {
         expected_qwen36_parameter_specs(&self.config)
     }
@@ -489,6 +512,14 @@ mod tests {
         let weights = artifacts.load_normalized_weights_f16().unwrap();
         assert!(weights.contains_key("model.embed_tokens.weight"));
         assert!(weights.contains_key("model.layers.0.mlp.experts.down_proj.weight"));
+        let expected_bytes = specs
+            .iter()
+            .map(|spec| spec.elements * std::mem::size_of::<f16>())
+            .sum::<usize>() as u64;
+        assert_eq!(
+            artifacts.estimated_runtime_weight_bytes_f16().unwrap(),
+            expected_bytes
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }

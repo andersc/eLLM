@@ -92,7 +92,7 @@ ELLM_MAX_GENERATION_TOKENS=16 \
 cargo run --release --bin ellm_agent_server
 ```
 
-官方 loader 会读取 `config.json`、`tokenizer.json`、`tokenizer_config.json` / `chat_template.jinja`、`model.safetensors.index.json` 以及所有分片 `*.safetensors`，并将 Qwen3.6-35B-A3B 官方使用的 `model.language_model.*` tensor 前缀和 `mlp.experts.down_proj` 命名归一化后注入 runtime。完整 35B-A3B checkpoint 的 safetensors 约 72 GB，未计 runtime/KV 额外内存，因此需要显著大于 32 GB 笔记本的内存容量。
+官方 loader 会读取 `config.json`、`tokenizer.json`、`tokenizer_config.json` / `chat_template.jinja`、`model.safetensors.index.json` 以及所有分片 `*.safetensors`，并将 Qwen3.6-35B-A3B 官方使用的 `model.language_model.*` tensor 前缀和 `mlp.experts.down_proj` 命名归一化后注入 runtime。完整 35B-A3B checkpoint 的 safetensors 约 72 GB，未计 runtime/KV 额外内存，因此需要显著大于 32 GB 笔记本的内存容量。启动时会先做内存预检查；如果估算的 FP16/BF16 runtime 需求超过系统内存，会在加载权重前失败。
 
 这条 eLLM 路径目前会把官方 FP16/BF16/F32 safetensors 加载进 CPU runtime。量化的 4-bit MLX/GGUF/AWQ/GPTQ checkpoint 不能直接与该 loader 互换；要由 eLLM 本身 serving，需要先实现对应的 packed-weight kernel。
 
