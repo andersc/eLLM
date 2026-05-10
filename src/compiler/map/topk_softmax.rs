@@ -145,15 +145,16 @@ impl TopKSoftmaxTrait<f16> for TopKSoftmax<f16> {
             thread_num,
             topk_size,
         );
-        /*
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
-        kernel::generic::softmax::softmax(
-            input_ptr,
-            sum_ptr.ptr,
-            max_ptr.ptr,
-            output_ptr,
-            length,
-        );*/
+        kernel::generic::truncated_topk_softmax::truncated_topk_softmax(
+            input_values_ptr,
+            input_indices_ptr,
+            output_values_ptr,
+            output_indices_ptr,
+            output_token_ptr,
+            thread_num,
+            topk_size,
+        );
     }
 }
 
@@ -168,7 +169,18 @@ impl TopKSoftmaxTrait<f32> for TopKSoftmax<f32> {
         thread_num: usize,
         topk_size: usize,
     ) {
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
         kernel::x86_64::f32_256::truncated_topk_softmax::truncated_topk_softmax(
+            input_values_ptr,
+            input_indices_ptr,
+            output_values_ptr,
+            output_indices_ptr,
+            output_token_ptr,
+            thread_num,
+            topk_size,
+        );
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2")))]
+        kernel::generic::truncated_topk_softmax::truncated_topk_softmax(
             input_values_ptr,
             input_indices_ptr,
             output_values_ptr,
@@ -273,7 +285,7 @@ mod test {
 
     #[test]
     fn test_topk_softmax_f16() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }

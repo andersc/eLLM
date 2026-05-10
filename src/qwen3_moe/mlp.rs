@@ -54,20 +54,20 @@ where
             // sequence_chunk_size: sequence_chunk_size,
             // head_size: head_size,
             gate_weight: Tensor::zeros(
-                vec![hidden_size, intermediate_size],
+                vec![intermediate_size, hidden_size],
                 format!("{}.gate_proj.weight", scope_name),
                 cache.clone(),
                 operator_queue.clone(),
             ),
             up_weight: Tensor::zeros(
-                vec![hidden_size, intermediate_size],
+                vec![intermediate_size, hidden_size],
                 format!("{}.up_proj.weight", scope_name),
                 cache.clone(),
                 operator_queue.clone(),
             ),
 
             down_weight: Tensor::zeros(
-                vec![intermediate_size, hidden_size],
+                vec![hidden_size, intermediate_size],
                 format!("{}.down_proj.weight", scope_name),
                 cache.clone(),
                 operator_queue.clone(),
@@ -84,35 +84,50 @@ where
         residual: &Tensor<T>,
         tensor_name: String,
     ) -> Tensor<T> {
-        let nonlinear_product = hidden_states.matmul_silu_mul_matmul(
+        let matmul_params = MatMulParams {
+            a_row_step_macro: 3,
+            b_row_step_macro: 128,
+            column_step_macro: 16,
+            a_row_step_micro: 3,
+            b_row_step_micro: 32,
+        };
+
+        let gate_product = hidden_states.matmul(
             &self.gate_weight,
-            &self.up_weight,
-            MatMulParams {
-                a_row_step_macro: 16,
-                b_row_step_macro: 16,
-                column_step_macro: 16,
-                a_row_step_micro: 8,
-                b_row_step_micro: 8,
-            },
-            format!("{}.nonlinear_part1", self.scope_name),
+            matmul_params,
+            hidden_states.shape[0],
+            format!("{}.gate", self.scope_name),
         );
 
-        let down_product = nonlinear_product.matmul_add(
+        let up_product = hidden_states.matmul(
+            &self.up_weight,
+            matmul_params,
+            hidden_states.shape[0],
+            format!("{}.up", self.scope_name),
+        );
+
+        let gate_view = gate_product.view(vec![
+            gate_product.shape[0],
+            gate_product.shape[1],
+            1,
+            gate_product.shape[2],
+        ]);
+        let up_view = up_product.view(vec![
+            up_product.shape[0],
+            up_product.shape[1],
+            1,
+            up_product.shape[2],
+        ]);
+        let nonlinear_product = gate_view
+            .silu_mul(&up_view, format!("{}.gate_up", self.scope_name))
+            .view(gate_product.shape.clone());
+
+        nonlinear_product.matmul_add(
             &self.down_weight,
             residual,
-            MatMulParams {
-                a_row_step_macro: 16,
-                b_row_step_macro: 16,
-                column_step_macro: 16,
-                a_row_step_micro: 8,
-                b_row_step_micro: 8,
-            },
-            format!("{}.nonlinear_part2", self.scope_name),
-        );
-
-        // let down_product = self.down_proj.forward(&nonlinear_product, tensor_name);
-        // println!("{:?} {:?}", nonlinear.shape, self.w2.weight.shape);
-        down_product
+            matmul_params,
+            tensor_name,
+        )
     }
 }
 

@@ -158,7 +158,13 @@ impl MoeMergeTrait<f16> for ExpertsMergeAdd<f16> {
         }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
         {
-            unreachable!("avx512fp16 required for MoeMergeTrait<f16>::merge_add");
+            unsafe {
+                for h in 0..len {
+                    let d = *out_row.add(h);
+                    let a = *add_row.add(h);
+                    *out_row.add(h) = d + a;
+                }
+            }
         }
     }
 }
@@ -190,7 +196,7 @@ mod tests {
 
     #[test]
     fn test_merge_add_k1_basic() {
-        if !is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             eprintln!("skip: avx512fp16 not detected");
             return;
         }
@@ -244,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_merge_add_k3_sum_and_residual() {
-        if !is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             eprintln!("skip: avx512fp16 not detected");
             return;
         }
@@ -299,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_merge_add_tail_h48() {
-        if !is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             eprintln!("skip: avx512fp16 not detected");
             return;
         }
@@ -402,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_merge_add_multithreaded_correctness() {
-        if !is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             eprintln!("skip: avx512fp16 not detected");
             return;
         }
@@ -469,7 +475,7 @@ mod tests {
     }
     #[test]
 fn test_merge_add_respects_run_batch_smaller_than_capacity() {
-    if !std::arch::is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }

@@ -3,7 +3,6 @@ use crate::compiler::assign::assign;
 use crate::init::send_sync_ptr::{ConstPtr, MutPtr};
 use crate::kernel::generic;
 use crate::kernel::generic::{exp::Exp, sqrt::Sqrt};
-use crate::kernel::x86_64;
 use crate::memory::allocator::allocate_init;
 use std::f16;
 use std::ops::{AddAssign, Sub};
@@ -148,7 +147,7 @@ impl SoftmaxTrait<f16> for ExpertsSoftmaxNorm<f16> {
         output_length: usize,
     ) {
         #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
-        x86_64::f16_512::experts_topk_softmax_norm::experts_topk_softmax_norm(
+        crate::kernel::x86_64::f16_512::experts_topk_softmax_norm::experts_topk_softmax_norm(
             input_ptr,
             topk_values_ptr,
             topk_indices_ptr,
@@ -160,6 +159,19 @@ impl SoftmaxTrait<f16> for ExpertsSoftmaxNorm<f16> {
             input_length,
             output_length,
             true,
+        );
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
+        generic::experts_topk_softmax_norm::experts_topk_softmax_norm(
+            input_ptr,
+            topk_values_ptr,
+            topk_indices_ptr,
+            experts_indicator,
+            indice_ptr,
+            weight_ptr,
+            token_index,
+            self.num_tokens,
+            input_length,
+            output_length,
         );
     }
 }
@@ -177,7 +189,21 @@ impl SoftmaxTrait<f32> for ExpertsSoftmaxNorm<f32> {
         input_length: usize,
         output_length: usize,
     ) {
-        x86_64::f32_256::experts_topk_softmax_norm::experts_topk_softmax_norm(
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+        crate::kernel::x86_64::f32_256::experts_topk_softmax_norm::experts_topk_softmax_norm(
+            input_ptr,
+            topk_values_ptr,
+            topk_indices_ptr,
+            experts_indicator,
+            indice_ptr,
+            weight_ptr,
+            token_index,
+            self.num_tokens,
+            input_length,
+            output_length,
+        );
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2")))]
+        generic::experts_topk_softmax_norm::experts_topk_softmax_norm(
             input_ptr,
             topk_values_ptr,
             topk_indices_ptr,
@@ -199,7 +225,7 @@ mod test {
 
     #[test]
     fn test_experts_softmax_norm_f32() {
-        if !std::arch::is_x86_feature_detected!("avx2") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx2")) {
             println!("AVX2 not supported, skipping test.");
             return;
         }
@@ -283,7 +309,7 @@ mod test {
     #[test]
     // #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
     fn test_experts_softmax_norm_f16() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }

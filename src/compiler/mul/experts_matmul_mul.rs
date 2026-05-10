@@ -499,9 +499,16 @@ impl ExpertsDownTrait<f16> for ExpertsMatMulDown<f16> {
         unsafe {
             kernel::x86_64::f16_512::matmul_block::matmul_block(a_tile, b_panel, acc, &call_param);
         }
-        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
+        #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+        unsafe {
+            kernel::aarch64::f16_128::matmul_block::matmul_block(a_tile, b_panel, acc, &call_param);
+        }
+        #[cfg(not(any(
+            all(target_arch = "x86_64", target_feature = "avx512fp16"),
+            all(target_arch = "aarch64", target_os = "macos")
+        )))]
         {
-            unreachable!("avx512fp16 required for ExpertsDownTrait<f16>::compute1");
+            kernel::generic::matmul_block::matmul_block(a_tile, b_panel, acc, &call_param);
         }
     }
 
@@ -516,7 +523,13 @@ impl ExpertsDownTrait<f16> for ExpertsMatMulDown<f16> {
         }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
         {
-            unreachable!("avx512fp16 required for ExpertsDownTrait<f16>::compute2");
+            unsafe {
+                for i in 0..len {
+                    let out = *out_row.add(i);
+                    let acc = *acc_row.add(i);
+                    *out_row.add(i) = out + factor_val * acc;
+                }
+            }
         }
     }
 }
@@ -603,7 +616,7 @@ mod tests {
 
     #[test]
     fn test_down_mb_gt_mr_basic_no_tail() {
-        if !is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             eprintln!("skip: avx512fp16 not detected");
             return;
         }
@@ -696,7 +709,7 @@ mod tests {
 
     #[test]
     fn test_down_tail_len_lt_32() {
-        if !is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             eprintln!("skip: avx512fp16 not detected");
             return;
         }
@@ -781,7 +794,7 @@ mod tests {
 
     #[test]
     fn test_down_two_experts_slot_scatter() {
-        if !is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             eprintln!("skip: avx512fp16 not detected");
             return;
         }
@@ -888,7 +901,7 @@ mod tests {
     }
     #[test]
 fn test_down_multithread_tail_and_accumulate_semantics() {
-    if !std::arch::is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
@@ -1029,7 +1042,7 @@ fn test_down_multithread_tail_and_accumulate_semantics() {
 #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
 fn test_down_stride_must_use_capacity_not_run_batch() {
     use std::arch::is_x86_feature_detected;
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
@@ -1176,7 +1189,7 @@ fn test_down_stride_must_use_capacity_not_run_batch() {
 #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
 fn test_down_stride_must_use_capacity_not_run_batch_nt_weight() {
     use std::arch::is_x86_feature_detected;
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
@@ -1298,7 +1311,7 @@ fn test_down_stride_must_use_capacity_not_run_batch_nt_weight() {
 
 #[test]
 fn test_down_uneven_expert_loads_many_threads() {
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
@@ -1408,7 +1421,7 @@ fn test_down_uneven_expert_loads_many_threads() {
 
 #[test]
 fn test_down_more_threads_than_tasks() {
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
@@ -1497,7 +1510,7 @@ fn test_down_more_threads_than_tasks() {
 
 #[test]
 fn test_down_active_expert_with_zero_tokens_keeps_output_zero() {
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }

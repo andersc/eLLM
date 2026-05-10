@@ -285,7 +285,20 @@ impl MatMulAddTrait<f16> for MatMulAdd<f16> {
             );
         }
 
-        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
+        #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+        unsafe {
+            kernel::aarch64::f16_128::matmul_block::matmul_block(
+                input_ptr1,
+                input_ptr2,
+                output_ptr,
+                &call_param,
+            );
+        }
+
+        #[cfg(not(any(
+            all(target_arch = "x86_64", target_feature = "avx512fp16"),
+            all(target_arch = "aarch64", target_os = "macos")
+        )))]
         kernel::generic::matmul_block::matmul_block(
             input_ptr1,
             input_ptr2,
@@ -392,7 +405,7 @@ mod tests {
 
     #[test]
     fn test_matmul_add_runner_f16_nt_6x64x32() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             // 这只是 runner test；不强制要求 avx512 才能跑也行
         }
 

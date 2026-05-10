@@ -426,9 +426,30 @@ impl MatMulkqvTrait<f16> for MatMul3<f16> {
                 a, b_panel, c, lda, ldc, kc,
             );
         }
-        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
+        #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+        unsafe {
+            let call_param = MatMulParams {
+                a_row_step_macro: lda,
+                b_row_step_macro: ldc,
+                column_step_macro: kc,
+                a_row_step_micro: self.params.a_row_step_micro,
+                b_row_step_micro: self.params.b_row_step_micro,
+            };
+            crate::kernel::aarch64::f16_128::matmul_block::matmul_block(a, b_panel, c, &call_param);
+        }
+        #[cfg(not(any(
+            all(target_arch = "x86_64", target_feature = "avx512fp16"),
+            all(target_arch = "aarch64", target_os = "macos")
+        )))]
         {
-            // TODO: fallback
+            let call_param = MatMulParams {
+                a_row_step_macro: lda,
+                b_row_step_macro: ldc,
+                column_step_macro: kc,
+                a_row_step_micro: self.params.a_row_step_micro,
+                b_row_step_micro: self.params.b_row_step_micro,
+            };
+            crate::kernel::generic::matmul_block::matmul_block(a, b_panel, c, &call_param);
         }
     }
 
@@ -446,7 +467,14 @@ impl MatMulkqvTrait<f16> for MatMul3<f16> {
         }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
         {
-            // TODO: fallback
+            let eps: f16 = 1e-6f32 as f16;
+            unsafe {
+                for row in 0..3 {
+                    let c_row = c_head.add(row * ldc);
+                    crate::kernel::generic::rms_norm::rms_norm(c_row, c_row, 128, eps);
+                    crate::kernel::generic::complex_mul::complex_mul(c_row, rope_head, c_row, 128);
+                }
+            }
         }
     }
 }

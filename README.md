@@ -17,7 +17,7 @@
 - **GPU-consistent behavior**: Targets the same numerical results and runtime behavior as GPU inference
 
 ## Hardware Requirements (No GPU/NPU Required)
-- **CPU**: Intel Xeon 4th Gen or newer, with AMX support
+- **CPU**: Intel Xeon 4th Gen or newer with AMX support for the primary server path; Apple Silicon M-series CPUs are supported on macOS through ARM64 FP16 NEON kernels and generic CPU fallbacks
 - **Memory**: Enough DDR5 capacity; no HBM required
 
 ## ✨ Advantages
@@ -56,7 +56,9 @@ Based on the CPU server profile of "large memory, large cache, modest compute," 
   During Prefill, the basic compute unit is a single token on a single KV head. The CPU finishes one head before moving to the next. This matches CPU hardware well: limited core counts, but large caches. The goal is to keep one head's KV data resident in cache as long as possible and reduce repeated memory loads.
 
 ## 🤖 Supported Models
-- ✅ Qwen3 series
+- ✅ Qwen3 series and Qwen3-MoE configs used by the current execution path
+- ✅ Qwen3.6 config ingestion for the official nested `text_config` format (`qwen3_5` / `qwen3_5_moe`) and renamed MoE fields
+- ⚠️ Qwen3.6 runtime generation is guarded for now: official Qwen3.6 uses `linear_attention` / Gated DeltaNet layers, which are parsed but not yet implemented as executable operators in eLLM
 - ✅ MiniMax M2.5
 
 ## Experiments
@@ -84,6 +86,7 @@ The minimum viable prototype of eLLM is now complete. To validate its performanc
 ### Notes on the Experiments
 - The current focus is **benchmarking and systems performance evaluation**.
 - **Operator-level** tests and alignment have been completed, which shows that the underlying execution path is basically functional.
+- Apple Silicon validation currently covers build, operator, and model-path tests on macOS ARM64, including FP16 NEON matrix kernels and Qwen3.6 config parsing. It does not yet provide an end-to-end tokens/second generation number.
 - **Model-level** outputs are not yet fully consistent with the reference implementation.
   - The current setup uses **randomly initialized parameters** and has not yet been connected to real model weights.
   - **Attention** and **tokenization** are not included at this stage.

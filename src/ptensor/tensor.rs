@@ -947,7 +947,7 @@ mod test {
 
     #[test]
     fn test_topk_softmax_f16() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -1077,7 +1077,7 @@ mod test {
 
     #[test]
     fn test_matmul3_f16() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -1235,7 +1235,7 @@ mod test {
 
     #[test]
     fn test_tensor_matmul3_f16_seq1_batch24() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -1401,7 +1401,7 @@ mod test {
 
     #[test]
     fn test_matmul_local_topk_f16() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -1532,7 +1532,7 @@ mod test {
 
     #[test]
     fn test_matmul_local_topk_f16_no_ties_stable() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -1661,7 +1661,7 @@ mod test {
 
     #[test]
     fn test_matmul_f16() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -1762,7 +1762,7 @@ mod test {
 
     #[test]
     fn test_matmul_add_f16() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -1979,7 +1979,7 @@ mod test {
 
     #[test]
     fn test_experts_matmul_silu_f16_tensor_api() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -2145,7 +2145,7 @@ mod test {
 
     #[test]
     fn test_experts_matmul_down_f16_tensor_api() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -2316,7 +2316,7 @@ mod test {
 
     #[test]
     fn test_experts_merge_add_f16_tensor_api_k2_slot1_zero() {
-        if !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -2483,14 +2483,14 @@ mod tests {
 
     #[inline]
     fn skip_if_no_avx512fp16() {
-        if !cfg!(target_arch = "x86_64") || !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(target_arch = "x86_64") || !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported on this machine, skipping test.");
         }
     }
 
     #[test]
     fn test_matmul_new_uses_bnt_directly_f16() {
-        if !cfg!(target_arch = "x86_64") || !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(target_arch = "x86_64") || !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -2547,7 +2547,7 @@ mod tests {
 
     #[test]
     fn test_matmul_panel_threads_available_f16() {
-        if !cfg!(target_arch = "x86_64") || !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(target_arch = "x86_64") || !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -2586,7 +2586,7 @@ mod tests {
 
     #[test]
     fn test_matmul_add_new_uses_bnt_directly_f16() {
-        if !cfg!(target_arch = "x86_64") || !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(target_arch = "x86_64") || !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -2640,7 +2640,7 @@ mod tests {
 
     #[test]
     fn test_matmul_add_panel_threads_available_f16() {
-        if !cfg!(target_arch = "x86_64") || !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(target_arch = "x86_64") || !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -2680,7 +2680,7 @@ mod tests {
 
     #[test]
     fn test_matmul_runner_f16_multi_tile_and_threads() {
-        if !cfg!(target_arch = "x86_64") || !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(target_arch = "x86_64") || !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }
@@ -2751,7 +2751,7 @@ mod tests {
     #[test]
     #[ignore = "performance test"]
     fn test_tensor_matmul_perf_single_operator_parallel() {
-        if !cfg!(target_arch = "x86_64") || !std::arch::is_x86_feature_detected!("avx512fp16") {
+        if !cfg!(target_arch = "x86_64") || !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
             println!("AVX512FP16 not supported, skipping test.");
             return;
         }

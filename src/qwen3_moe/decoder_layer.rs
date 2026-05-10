@@ -13,8 +13,7 @@ use super::super::compiler::operator::Operator;
 use super::super::memory::cache::Cache;
 use super::super::ptensor::tensor::Tensor;
 use super::attention::Attention;
-use super::sparse_moe_block::SparseMoeBlock;
-// use super::moe_layer::MoeLayer;
+use super::moe_layer::MoeLayer;
 // use crate::qwen3_moe::mlp;
 // use super::feedforward::FeedForward;
 
@@ -33,8 +32,7 @@ where
     word_embedding: Rc<Tensor<T>>,
     position_embedding: Rc<Tensor<T>>,
     self_attention: Attention<T>,
-    // moe_layer: MoeLayer<T>,
-    sparse_moe_block: SparseMoeBlock<T>,
+    moe_layer: MoeLayer<T>,
     scope_name: String,
     cache: Rc<RefCell<Cache<T>>>,
     operator_queue: Rc<RefCell<Vec<Operator<T>>>>,
@@ -110,16 +108,30 @@ where
                 operator_queue.clone(),
             ),
             
-            sparse_moe_block: SparseMoeBlock::new(
-                config.hidden_size,
-                config.moe_intermediate_size,
-                config.num_experts,
-                config.num_experts_per_tok,
-                config.norm_topk_prob,
-                &scope_name,
-                cache.clone(),
-                operator_queue.clone(),
-            ),
+            moe_layer: if config.num_experts > 0
+                && config.num_experts_per_tok > 0
+                && !config.mlp_only_layers.contains(&layer_idx)
+                && (layer_idx + 1) % config.decoder_sparse_step == 0
+            {
+                MoeLayer::new_sparse_moe(
+                    config.hidden_size,
+                    config.moe_intermediate_size,
+                    config.num_experts,
+                    config.num_experts_per_tok,
+                    config.norm_topk_prob,
+                    &scope_name,
+                    cache.clone(),
+                    operator_queue.clone(),
+                )
+            } else {
+                MoeLayer::new_mlp(
+                    config.hidden_size,
+                    config.intermediate_size,
+                    &scope_name,
+                    cache.clone(),
+                    operator_queue.clone(),
+                )
+            },
             word_embedding: word_embedding,
             position_embedding: position_embedding,
             cache: cache,
@@ -171,7 +183,7 @@ where
         );
         
         
-        let output_hidden_states = self.sparse_moe_block.forward(
+        let output_hidden_states = self.moe_layer.forward(
             &norm_hidden_states,
             &attention_hidden_states,
             format!("{}.attention_hidden3", self.scope_name),

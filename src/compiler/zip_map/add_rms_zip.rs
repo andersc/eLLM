@@ -106,7 +106,7 @@ where
 
 impl ZipMapTrait<f16> for AddRMSZipMap<f16> {
     fn compute(&self, input_ptr1: *const f16, input_ptr2: *const f16, output_ptr: *mut f16) {
-        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
         kernel::x86_64::f16_512::rms_norm::add_rms_norm(
             input_ptr1,
             input_ptr2,

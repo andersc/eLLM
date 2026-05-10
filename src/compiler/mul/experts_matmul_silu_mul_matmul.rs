@@ -480,9 +480,36 @@ impl ExpertsSiluTrait<f16> for ExpertsMatMulSilu<f16> {
                 a_tile, gate_panel, up_panel, gate_acc, up_acc, kc,
             );
         }
-        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
+        #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+        unsafe {
+            let params = MatMulParams {
+                a_row_step_macro: kc,
+                b_row_step_macro: 32,
+                column_step_macro: kc,
+                a_row_step_micro: self.params.a_row_step_micro,
+                b_row_step_micro: self.params.b_row_step_micro,
+            };
+            crate::kernel::aarch64::f16_128::matmul_block::matmul_block(
+                a_tile, gate_panel, gate_acc, &params,
+            );
+            crate::kernel::aarch64::f16_128::matmul_block::matmul_block(
+                a_tile, up_panel, up_acc, &params,
+            );
+        }
+        #[cfg(not(any(
+            all(target_arch = "x86_64", target_feature = "avx512fp16"),
+            all(target_arch = "aarch64", target_os = "macos")
+        )))]
         {
-            unreachable!("avx512fp16 required for ExpertsMatMulSilu<f16>::compute1");
+            let params = MatMulParams {
+                a_row_step_macro: kc,
+                b_row_step_macro: 32,
+                column_step_macro: kc,
+                a_row_step_micro: self.params.a_row_step_micro,
+                b_row_step_micro: self.params.b_row_step_micro,
+            };
+            crate::kernel::generic::matmul_block::matmul_block(a_tile, gate_panel, gate_acc, &params);
+            crate::kernel::generic::matmul_block::matmul_block(a_tile, up_panel, up_acc, &params);
         }
     }
 
@@ -495,7 +522,14 @@ impl ExpertsSiluTrait<f16> for ExpertsMatMulSilu<f16> {
         }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
         {
-            unreachable!("avx512fp16 required for ExpertsMatMulSilu<f16>::compute2");
+            unsafe {
+                for j in 0..32 {
+                    let gate = *gate_row.add(j);
+                    let up = *up_row.add(j);
+                    let sigmoid = 1.0f16 / (1.0f16 + (-gate).exp());
+                    *c_row.add(j) = gate * sigmoid * up;
+                }
+            }
         }
     }
 }
@@ -1248,7 +1282,7 @@ fn test_experts_matmul_silu_qwen_moe_config() {
 #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
 fn test_silu_stride_capacity_batch_run_must_not_touch_rows_7_8() {
     use std::arch::is_x86_feature_detected;
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }

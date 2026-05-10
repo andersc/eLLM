@@ -374,7 +374,14 @@ impl MatMulTopKTrait<f16> for MatMulTopK<f16> {
         unsafe {
             kernel::x86_64::f16_512::matmul_block::matmul_block(input_ptr1, input_ptr2, output_ptr, &call_param);
         }
-        #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512fp16")))]
+        #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+        unsafe {
+            kernel::aarch64::f16_128::matmul_block::matmul_block(input_ptr1, input_ptr2, output_ptr, &call_param);
+        }
+        #[cfg(not(any(
+            all(target_arch = "x86_64", target_feature = "avx512fp16"),
+            all(target_arch = "aarch64", target_os = "macos")
+        )))]
         {
             kernel::generic::matmul_block::matmul_block(input_ptr1, input_ptr2, output_ptr, &call_param);
         }

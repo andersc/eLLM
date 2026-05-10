@@ -1,4 +1,5 @@
 use crate::kernel::generic::exp::Exp;
+use std::cmp::Ordering;
 use std::ops::{AddAssign, Div, Sub};
 use std::ptr;
 
@@ -31,7 +32,7 @@ pub fn experts_topk_softmax_norm<
             .collect();
 
         // Sort by value in descending order
-        indexed_values.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        indexed_values.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
 
         // Take top-k
         let topk_items = &indexed_values[..num_topk.min(num_experts)];

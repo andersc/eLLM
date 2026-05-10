@@ -76,6 +76,10 @@ where
         batch_size: usize,
         topk_size: usize,
     ) -> Self {
+        if let Some(reason) = config.unsupported_runtime_reason() {
+            panic!("{}", reason);
+        }
+
         let scope_name = String::from("model");
 
         // let torch_file = String::from("D:/llama-3-chinese-8b-instruct-v3");
@@ -278,5 +282,64 @@ mod test {
                 operator.run(0, 1, batch_size, thread_num, i);
             }
         }
+    }
+
+    #[test]
+    fn test_qwen3_dense_model_uses_mlp_path() {
+        let config = Config::from_json_str(
+            r#"{
+                "architectures": ["Qwen3ForCausalLM"],
+                "model_type": "qwen3",
+                "hidden_size": 128,
+                "intermediate_size": 256,
+                "num_attention_heads": 1,
+                "num_key_value_heads": 1,
+                "num_hidden_layers": 1,
+                "vocab_size": 32000,
+                "max_position_embeddings": 16,
+                "eos_token_id": [151645, 151643],
+                "rms_norm_eps": 1e-6
+            }"#,
+        )
+        .unwrap();
+
+        let mut model = Model::<f16>::new(&config, 16, 1, 3, 8);
+        let sequences = allocate_init::<usize>(17 * 3, 0);
+        let _ = model.forward(sequences);
+        let queue = model.operator_queue.borrow();
+
+        assert!(queue.iter().any(|op| matches!(op, Operator::SiluMulZipMap(_))));
+        assert!(!queue.iter().any(|op| matches!(
+            op,
+            Operator::ExpertsSoftmaxNorm(_)
+                | Operator::ExpertsMatMulSilu(_)
+                | Operator::ExpertsMatMulDown(_)
+        )));
+    }
+
+    #[test]
+    #[should_panic(expected = "Qwen3.6 linear_attention/Gated DeltaNet execution is not implemented")]
+    fn test_qwen36_linear_attention_runtime_is_rejected() {
+        let config = Config::from_json_str(
+            r#"{
+                "architectures": ["Qwen3_5ForConditionalGeneration"],
+                "model_type": "qwen3_5",
+                "text_config": {
+                    "eos_token_id": 248044,
+                    "head_dim": 64,
+                    "hidden_size": 128,
+                    "intermediate_size": 256,
+                    "layer_types": ["linear_attention"],
+                    "model_type": "qwen3_5_text",
+                    "num_attention_heads": 2,
+                    "num_hidden_layers": 1,
+                    "num_key_value_heads": 1,
+                    "vocab_size": 1024
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let _ = Model::<f16>::new(&config, 16, 1, 1, 4);
     }
 }

@@ -486,7 +486,7 @@ mod test {
 
     #[test]
     fn test_experts_softmax_norm() {
-        if !std::arch::is_x86_feature_detected!("avx2") {
+        if !cfg!(all(target_arch = "x86_64", target_feature = "avx2")) {
             println!("AVX2 not supported, skipping test.");
             return;
         }
@@ -1325,7 +1325,7 @@ fn ref_down_f32(
 #[test]
 #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
 fn test_operator_experts_down_f16_dispatch_basic_mb_gt_mr() {
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
@@ -1452,7 +1452,7 @@ fn test_operator_experts_down_f16_dispatch_basic_mb_gt_mr() {
 #[test]
 #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
 fn test_operator_experts_down_f16_dispatch_tail_cols() {
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
@@ -1586,7 +1586,7 @@ fn ref_merge_add_f32(
 #[test]
 #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
 fn test_operator_merge_add_f16_dispatch_k1_basic() {
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
@@ -1649,7 +1649,7 @@ fn test_operator_merge_add_f16_dispatch_k1_basic() {
 #[test]
 #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
 fn test_operator_merge_add_f16_dispatch_k3_and_tail_h48() {
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
@@ -1717,7 +1717,7 @@ fn test_operator_merge_add_f16_dispatch_k3_and_tail_h48() {
 #[test]
 #[cfg(all(target_arch = "x86_64", target_feature = "avx512fp16"))]
 fn test_operator_merge_add_f16_dispatch_reset_gating_multithread() {
-    if !is_x86_feature_detected!("avx512fp16") {
+    if !cfg!(all(target_arch = "x86_64", target_feature = "avx512fp16")) {
         eprintln!("skip: avx512fp16 not detected");
         return;
     }
