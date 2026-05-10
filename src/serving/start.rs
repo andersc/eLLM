@@ -9,7 +9,7 @@ use crate::runtime::barrier::Barrier;
 use std::ops::{AddAssign, Neg, Sub};
 
 use super::super::compiler::operator::Operator;
-// use crate::kernel::generic::from_f32::FromF32;
+use crate::kernel::generic::from_f32::FromF32;
 use crate::kernel::generic::sigmoid::Sigmoid;
 use crate::kernel::generic::sqrt::Sqrt;
 use crate::kernel::generic::{exp::Exp, neg_infinity::NegInfinity};
@@ -26,6 +26,9 @@ where
         + NegInfinity
         + Sigmoid<T>
         + Sqrt
+        + FromF32
+        + crate::compiler::mul::qwen36_full_attention::Scalar
+        + crate::compiler::mul::qwen36_gated_delta::Scalar
         + AddAssign
         + Send
         + Sync

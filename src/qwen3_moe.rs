@@ -1,7 +1,9 @@
 pub mod config;
 pub mod attention;
+pub mod gated_delta_net;
 pub mod mlp;
 pub mod moe_layer;
+pub mod qwen36_attention;
 pub mod sparse_moe_block;
 pub mod decoder_layer;
 pub mod model;

@@ -703,10 +703,13 @@ where
         operator_queue: Rc<RefCell<Vec<Operator<T>>>>,
     ) -> Self {
         let length: usize = shape.iter().product();
+        let has_parameter = cache.borrow().has_parameter(&tensor_name);
         let v = Self::from_cache(shape, tensor_name, cache, operator_queue);
-        (0..length).for_each(|x| unsafe {
-            *v.data.add(x) = T::default();
-        });
+        if !has_parameter {
+            (0..length).for_each(|x| unsafe {
+                *v.data.add(x) = T::default();
+            });
+        }
         v
     }
 

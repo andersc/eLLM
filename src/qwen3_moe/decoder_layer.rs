@@ -13,7 +13,9 @@ use super::super::compiler::operator::Operator;
 use super::super::memory::cache::Cache;
 use super::super::ptensor::tensor::Tensor;
 use super::attention::Attention;
+use super::gated_delta_net::GatedDeltaNet;
 use super::moe_layer::MoeLayer;
+use super::qwen36_attention::Qwen36Attention;
 // use crate::qwen3_moe::mlp;
 // use super::feedforward::FeedForward;
 
@@ -31,11 +33,20 @@ where
     layer_idx: usize,
     word_embedding: Rc<Tensor<T>>,
     position_embedding: Rc<Tensor<T>>,
-    self_attention: Attention<T>,
+    token_mixer: TokenMixer<T>,
     moe_layer: MoeLayer<T>,
     scope_name: String,
     cache: Rc<RefCell<Cache<T>>>,
     operator_queue: Rc<RefCell<Vec<Operator<T>>>>,
+}
+
+pub enum TokenMixer<T>
+where
+    T: Copy + PartialOrd,
+{
+    LegacyAttention(Attention<T>),
+    Qwen36LinearAttention(GatedDeltaNet<T>),
+    Qwen36FullAttention(Qwen36Attention<T>),
 }
 
 impl<T> DecoderLayer<T>
@@ -100,13 +111,32 @@ where
             head_dim: config.head_dim,
             rms_norm_eps: T::from_f32(config.rms_norm_eps),
             layer_idx: layer_idx,
-            self_attention: Attention::<T>::new(
-                config,
-                layer_idx,
-                &scope_name,
-                cache.clone(),
-                operator_queue.clone(),
-            ),
+            token_mixer: match config.layer_type(layer_idx) {
+                Some("linear_attention") => TokenMixer::Qwen36LinearAttention(GatedDeltaNet::new(
+                    config,
+                    layer_idx,
+                    sequence_chunk_size,
+                    batch_size,
+                    &scope_name,
+                    cache.clone(),
+                    operator_queue.clone(),
+                )),
+                Some("full_attention") => TokenMixer::Qwen36FullAttention(Qwen36Attention::new(
+                    config,
+                    sequence_chunk_size,
+                    batch_size,
+                    &scope_name,
+                    cache.clone(),
+                    operator_queue.clone(),
+                )),
+                _ => TokenMixer::LegacyAttention(Attention::<T>::new(
+                    config,
+                    layer_idx,
+                    &scope_name,
+                    cache.clone(),
+                    operator_queue.clone(),
+                )),
+            },
             
             moe_layer: if config.num_experts > 0
                 && config.num_experts_per_tok > 0
@@ -169,12 +199,23 @@ where
         let hidden_states = &hidden_states_owned;
 
         //  attention + add
-        let attention_hidden_states = self.self_attention.forward(
-            &norm_hidden,
-            hidden_states,
-            &*self.position_embedding,
-            // format!("{}.attention_hidden1", self.scope_name),
-        );
+        let attention_hidden_states = match &self.token_mixer {
+            TokenMixer::LegacyAttention(self_attention) => self_attention.forward(
+                &norm_hidden,
+                hidden_states,
+                &*self.position_embedding,
+            ),
+            TokenMixer::Qwen36LinearAttention(linear_attention) => linear_attention.forward(
+                &norm_hidden,
+                hidden_states,
+                format!("{}.linear_attn.output", self.scope_name),
+            ),
+            TokenMixer::Qwen36FullAttention(full_attention) => full_attention.forward(
+                &norm_hidden,
+                hidden_states,
+                format!("{}.self_attn.output", self.scope_name),
+            ),
+        };
 
         let norm_hidden_states = attention_hidden_states.rms(
             // self.layernorm_weight.data,

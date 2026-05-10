@@ -104,15 +104,6 @@ where
                 let mut output_ptr = self.output_ptr.ptr;
 
 
-                // 遍历每个chunk;
-                println!(
-                    "thread_id: {}, begin: {}, end: {}",
-                    thread_id,
-                    begin,
-                    end,
-                    // self.chunks.len()
-                );
-
                 // [sequence, batch, head_num, head_size]
                 for _ in begin..end {
                     let index = (high_index * max_stride + row_index * self.attention_head_num + col_index)

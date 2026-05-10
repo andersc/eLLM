@@ -7,5 +7,6 @@ pub mod matmul;
 pub mod matmul3;
 pub mod matmul_add;
 pub mod matmul_topk;
+pub mod qwen36_full_attention;
+pub mod qwen36_gated_delta;
 // pub mod matmul_silu_mul_matmul;
-

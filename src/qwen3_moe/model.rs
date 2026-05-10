@@ -1,6 +1,7 @@
 use core_affinity;
 use std::cell::RefCell;
 use std::cell::SyncUnsafeCell;
+use std::collections::HashMap;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub};
 use std::ptr::null;
 use std::rc::Rc;
@@ -76,6 +77,24 @@ where
         batch_size: usize,
         topk_size: usize,
     ) -> Self {
+        Self::new_with_parameters(
+            config,
+            sequence_length,
+            sequence_chunk_size,
+            batch_size,
+            topk_size,
+            HashMap::new(),
+        )
+    }
+
+    pub fn new_with_parameters(
+        config: &Config,
+        sequence_length: usize,
+        sequence_chunk_size: usize,
+        batch_size: usize,
+        topk_size: usize,
+        parameter_tensors: HashMap<String, Vec<T>>,
+    ) -> Self {
         if let Some(reason) = config.unsupported_runtime_reason() {
             panic!("{}", reason);
         }
@@ -85,7 +104,6 @@ where
         // let torch_file = String::from("D:/llama-3-chinese-8b-instruct-v3");
         // let loader = SafeTensorsLoader::new(&torch_file).unwrap();
         // let tensors = loader.load_all_weights_f16().unwrap();
-        let parameter_tensors = std::collections::HashMap::new();
         let cache = Rc::new(RefCell::new(Cache::new(parameter_tensors)));
         let operator_queue: Rc<RefCell<Vec<Operator<T>>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -318,28 +336,154 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Qwen3.6 linear_attention/Gated DeltaNet execution is not implemented")]
-    fn test_qwen36_linear_attention_runtime_is_rejected() {
+    fn test_qwen36_linear_attention_runtime_queues_gated_delta() {
         let config = Config::from_json_str(
             r#"{
                 "architectures": ["Qwen3_5ForConditionalGeneration"],
                 "model_type": "qwen3_5",
                 "text_config": {
                     "eos_token_id": 248044,
-                    "head_dim": 64,
-                    "hidden_size": 128,
-                    "intermediate_size": 256,
+                    "head_dim": 4,
+                    "hidden_size": 4,
+                    "intermediate_size": 8,
                     "layer_types": ["linear_attention"],
+                    "linear_conv_kernel_dim": 2,
+                    "linear_key_head_dim": 2,
+                    "linear_num_key_heads": 1,
+                    "linear_num_value_heads": 1,
+                    "linear_value_head_dim": 2,
                     "model_type": "qwen3_5_text",
-                    "num_attention_heads": 2,
+                    "num_attention_heads": 1,
                     "num_hidden_layers": 1,
                     "num_key_value_heads": 1,
-                    "vocab_size": 1024
+                    "vocab_size": 8
                 }
             }"#,
         )
         .unwrap();
 
-        let _ = Model::<f16>::new(&config, 16, 1, 1, 4);
+        let mut model = Model::<f16>::new(&config, 2, 2, 1, 2);
+        let sequences = allocate_init::<usize>(3, 0);
+        let _ = model.forward(sequences);
+        let queue = model.operator_queue.borrow();
+
+        assert!(queue
+            .iter()
+            .any(|op| matches!(op, Operator::Qwen36GatedDelta(_))));
+    }
+
+    #[test]
+    fn test_qwen36_full_attention_runtime_queues_output_gated_attention() {
+        let config = Config::from_json_str(
+            r#"{
+                "architectures": ["Qwen3_5ForConditionalGeneration"],
+                "model_type": "qwen3_5",
+                "text_config": {
+                    "eos_token_id": 248044,
+                    "head_dim": 4,
+                    "hidden_size": 4,
+                    "intermediate_size": 8,
+                    "layer_types": ["full_attention"],
+                    "model_type": "qwen3_5_text",
+                    "num_attention_heads": 1,
+                    "num_hidden_layers": 1,
+                    "num_key_value_heads": 1,
+                    "vocab_size": 8
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut model = Model::<f16>::new(&config, 2, 2, 1, 2);
+        let sequences = allocate_init::<usize>(3, 0);
+        let _ = model.forward(sequences);
+        let queue = model.operator_queue.borrow();
+
+        assert!(queue
+            .iter()
+            .any(|op| matches!(op, Operator::Qwen36FullAttention(_))));
+    }
+
+    #[test]
+    fn test_qwen36_dense_runtime_executes_operator_queue() {
+        let config = Config::from_json_str(
+            r#"{
+                "architectures": ["Qwen3_5ForConditionalGeneration"],
+                "model_type": "qwen3_5",
+                "text_config": {
+                    "eos_token_id": 248044,
+                    "head_dim": 16,
+                    "hidden_size": 64,
+                    "intermediate_size": 64,
+                    "layer_types": ["linear_attention", "full_attention"],
+                    "linear_conv_kernel_dim": 4,
+                    "linear_key_head_dim": 16,
+                    "linear_num_key_heads": 2,
+                    "linear_num_value_heads": 4,
+                    "linear_value_head_dim": 16,
+                    "max_position_embeddings": 32,
+                    "model_type": "qwen3_5_text",
+                    "num_attention_heads": 4,
+                    "num_hidden_layers": 2,
+                    "num_key_value_heads": 2,
+                    "partial_rotary_factor": 0.25,
+                    "rms_norm_eps": 1e-6,
+                    "rope_theta": 10000000,
+                    "vocab_size": 64
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let sequence_length = 4;
+        let batch_size = 3;
+        let mut model = Model::<f16>::new(&config, sequence_length, sequence_length, batch_size, 4);
+        let sequences = allocate_init::<usize>((sequence_length + 1) * batch_size, 0);
+        let _ = model.forward(sequences);
+        let queue = model.operator_queue.borrow();
+
+        assert!(queue
+            .iter()
+            .any(|op| matches!(op, Operator::Qwen36GatedDelta(_))));
+        assert!(queue
+            .iter()
+            .any(|op| matches!(op, Operator::Qwen36FullAttention(_))));
+
+        for operator in queue.iter() {
+            operator.run(0, sequence_length, batch_size, 1, 0);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Qwen3.6 MoE shared-expert execution is not implemented")]
+    fn test_qwen36_moe_runtime_is_still_rejected() {
+        let config = Config::from_json_str(
+            r#"{
+                "architectures": ["Qwen3_5MoeForConditionalGeneration"],
+                "model_type": "qwen3_5_moe",
+                "text_config": {
+                    "eos_token_id": 248044,
+                    "head_dim": 4,
+                    "hidden_size": 4,
+                    "layer_types": ["linear_attention"],
+                    "linear_key_head_dim": 2,
+                    "linear_num_key_heads": 1,
+                    "linear_num_value_heads": 1,
+                    "linear_value_head_dim": 2,
+                    "model_type": "qwen3_5_moe_text",
+                    "moe_intermediate_size": 4,
+                    "num_attention_heads": 1,
+                    "num_experts": 2,
+                    "num_experts_per_tok": 1,
+                    "num_hidden_layers": 1,
+                    "num_key_value_heads": 1,
+                    "shared_expert_intermediate_size": 4,
+                    "vocab_size": 8
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let _ = Model::<f16>::new(&config, 2, 2, 1, 2);
     }
 }

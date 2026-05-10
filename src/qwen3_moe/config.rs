@@ -18,6 +18,11 @@ pub struct Config {
     pub initializer_range: f32,
     pub intermediate_size: usize,
     pub layer_types: Vec<String>,
+    pub linear_conv_kernel_dim: usize,
+    pub linear_key_head_dim: usize,
+    pub linear_num_key_heads: usize,
+    pub linear_num_value_heads: usize,
+    pub linear_value_head_dim: usize,
     pub max_position_embeddings: usize,
     pub max_window_layers: usize,
     pub mlp_only_layers: Vec<usize>,
@@ -31,6 +36,7 @@ pub struct Config {
     pub num_key_value_heads: usize,
     pub output_router_logits: bool,
     pub qkv_bias: bool,
+    pub partial_rotary_factor: f32,
     pub rms_norm_eps: f32,
     pub rope_scaling: Option<HashMap<String, Value>>,
     pub rope_theta: f64,
@@ -61,6 +67,11 @@ impl Default for Config {
             initializer_range: 0.02,
             intermediate_size: 0,
             layer_types: Vec::new(),
+            linear_conv_kernel_dim: 4,
+            linear_key_head_dim: 128,
+            linear_num_key_heads: 16,
+            linear_num_value_heads: 32,
+            linear_value_head_dim: 128,
             max_position_embeddings: 0,
             max_window_layers: 0,
             mlp_only_layers: Vec::new(),
@@ -74,6 +85,7 @@ impl Default for Config {
             num_key_value_heads: 0,
             output_router_logits: false,
             qkv_bias: false,
+            partial_rotary_factor: 0.25,
             rms_norm_eps: 1e-6,
             rope_scaling: None,
             rope_theta: 1_000_000.0,
@@ -129,6 +141,19 @@ impl Config {
         if self.full_attention_interval == 0 {
             self.full_attention_interval = 1;
         }
+        if self.layer_types.is_empty()
+            && (self.model_type == "qwen3_5_text" || self.model_type == "qwen3_5_moe_text")
+        {
+            self.layer_types = (0..self.num_hidden_layers)
+                .map(|i| {
+                    if (i + 1) % self.full_attention_interval == 0 {
+                        "full_attention".to_string()
+                    } else {
+                        "linear_attention".to_string()
+                    }
+                })
+                .collect();
+        }
         if self.num_experts == 0 {
             self.num_experts_per_tok = 0;
             self.moe_intermediate_size = 0;
@@ -152,13 +177,21 @@ impl Config {
     }
 
     pub fn unsupported_runtime_reason(&self) -> Option<&'static str> {
-        if self.has_qwen36_linear_attention() {
+        if self.model_type == "qwen3_5_moe_text" {
             Some(
-                "Qwen3.6 linear_attention/Gated DeltaNet execution is not implemented in eLLM yet; config parsing is supported, but running this model would be incorrect.",
+                "Qwen3.6 MoE shared-expert execution is not implemented in eLLM yet; dense Qwen3.6 text runtime is supported.",
             )
         } else {
             None
         }
+    }
+
+    pub fn linear_key_dim(&self) -> usize {
+        self.linear_num_key_heads * self.linear_key_head_dim
+    }
+
+    pub fn linear_value_dim(&self) -> usize {
+        self.linear_num_value_heads * self.linear_value_head_dim
     }
 }
 
@@ -210,6 +243,14 @@ fn normalize_qwen_aliases(value: &mut Value) {
                 "rope_scaling".to_string(),
                 Value::Object(rope_parameters.clone()),
             );
+        }
+        if !object.contains_key("partial_rotary_factor") {
+            if let Some(partial_rotary_factor) = rope_parameters.get("partial_rotary_factor") {
+                object.insert(
+                    "partial_rotary_factor".to_string(),
+                    partial_rotary_factor.clone(),
+                );
+            }
         }
     }
 }
@@ -341,8 +382,14 @@ mod tests {
         assert_eq!(config.moe_intermediate_size, 512);
         assert_eq!(config.shared_experts_intermediate_size, 512);
         assert_eq!(config.intermediate_size, 512);
+        assert_eq!(config.linear_conv_kernel_dim, 4);
+        assert_eq!(config.linear_key_head_dim, 128);
+        assert_eq!(config.linear_value_head_dim, 128);
+        assert_eq!(config.linear_num_key_heads, 16);
+        assert_eq!(config.linear_num_value_heads, 32);
         assert_eq!(config.eos_token_id, 248044);
         assert_eq!(config.rope_theta, 10_000_000.0);
+        assert_eq!(config.partial_rotary_factor, 0.25);
         assert!(config.attn_output_gate);
         assert!(config.has_qwen36_linear_attention());
     }
@@ -391,6 +438,11 @@ mod tests {
         assert_eq!(config.num_attention_heads, 24);
         assert_eq!(config.num_key_value_heads, 4);
         assert_eq!(config.num_hidden_layers, 64);
+        assert_eq!(config.linear_conv_kernel_dim, 4);
+        assert_eq!(config.linear_key_head_dim, 128);
+        assert_eq!(config.linear_value_head_dim, 128);
+        assert_eq!(config.linear_num_key_heads, 16);
+        assert_eq!(config.linear_num_value_heads, 32);
         assert_eq!(config.num_experts, 0);
         assert_eq!(config.num_experts_per_tok, 0);
         assert_eq!(config.eos_token_id, 248044);

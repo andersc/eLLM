@@ -70,8 +70,6 @@ where T: Copy + Default + Add<Output = T> + Sub<Output = T>+ Mul<Output = T> + D
             let (mut high_index, mut _index) = (begin / stride, begin % stride);
             let (mut row_index, mut col_index) = (_index / self.head_num, _index % self.head_num);
 
-            println!("thread_id: {}, begin: {}, end: {}, high_index: {}, row_index: {}, col_index: {}", thread_id, begin, end, high_index, row_index, col_index);
-
             let ptr1 = self.ptr1.ptr;
             let ptr2 = self.ptr2.ptr;
             let output_ptr = self.output_ptr.ptr;
@@ -79,7 +77,6 @@ where T: Copy + Default + Add<Output = T> + Sub<Output = T>+ Mul<Output = T> + D
             // 遍历每个chunk
             for _ in begin..end {
 
-                println!(" high_index: {}, row_index: {}, col_index: {}",  high_index, row_index, col_index);
                 let index = high_index* max_stride + row_index * self.head_num + col_index;
                 unsafe {
                     // let (a, b, c) = self.chunks.get_unchecked(index);

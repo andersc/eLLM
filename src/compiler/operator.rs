@@ -1,6 +1,7 @@
 use crate::kernel::generic::sigmoid::Sigmoid;
 use crate::kernel::generic::sqrt::Sqrt;
 use crate::kernel::generic::{exp::Exp, neg_infinity::NegInfinity};
+use crate::kernel::generic::from_f32::FromF32;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub};
 
 use super::map::experts_softmax_norm::ExpertsSoftmaxNorm;
@@ -17,6 +18,8 @@ use super::mul::experts_matmul_mul::ExpertsMatMulDown;
 use super::mul::experts_matmul_silu_mul_matmul::ExpertsMatMulSilu;
 use super::mul::experts_merge_add::ExpertsMergeAdd;
 use super::mul::matmul_topk::MatMulTopK;
+use super::mul::qwen36_full_attention::Qwen36FullAttention;
+use super::mul::qwen36_gated_delta::Qwen36GatedDelta;
 use super::zip_map::add_rms_zip::AddRMSZipMap;
 use super::zip_map::add_zip::AddZipMap;
 use super::zip_map::complex_zip::ComplexZipMap;
@@ -45,6 +48,8 @@ where
     MatMulAdd(MatMulAdd<T>),
     // MatMulSiluMulMatMul(MatMulSilu<T>),
     MatMulTopK(MatMulTopK<T>),
+    Qwen36FullAttention(Qwen36FullAttention<T>),
+    Qwen36GatedDelta(Qwen36GatedDelta<T>),
     RMSMap(RMSMap<T>),
     SiluMulZipMap(SiluMulZipMap<T>),
     // SoftmaxMap(SoftmaxMap<T>),
@@ -63,6 +68,9 @@ where
         + NegInfinity
         + Sigmoid<T>
         + Sqrt
+        + FromF32
+        + super::mul::qwen36_full_attention::Scalar
+        + super::mul::qwen36_gated_delta::Scalar
         + AddAssign,
 {
     pub fn run(
@@ -195,6 +203,24 @@ where
                 );
             }*/
             Self::MatMulTopK(operator) => {
+                operator.run(
+                    position_index,
+                    position_interval,
+                    batch_size,
+                    cpu_num,
+                    thread_id,
+                );
+            }
+            Self::Qwen36FullAttention(operator) => {
+                operator.run(
+                    position_index,
+                    position_interval,
+                    batch_size,
+                    cpu_num,
+                    thread_id,
+                );
+            }
+            Self::Qwen36GatedDelta(operator) => {
                 operator.run(
                     position_index,
                     position_interval,

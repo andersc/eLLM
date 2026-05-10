@@ -64,8 +64,6 @@ where
             let (mut high_index, mut _index) = (begin / stride, begin % stride);
             let (mut row_index, mut col_index) = (_index / self.head_num, _index % self.head_num);
 
-            println!("thread_id: {}, begin: {}, end: {}, ", thread_id, begin, end,);
-            
             let mut ptr1 = self.ptr1.ptr;
             let mut ptr2 = self.ptr2.ptr;
             let mut output_ptr = self.output_ptr.ptr;
@@ -74,7 +72,6 @@ where
             for _ in begin..end {
                 
                 let index = high_index * max_stride + row_index * self.head_num + col_index;
-                println!(" high_index: {}, row_index: {}, col_index: {}, index: {}",  high_index, row_index, col_index, index);
                 unsafe {
                     // let (a, b, c) = self.chunks.get_unchecked(index);
                     let p = index * self.head_size;

@@ -58,8 +58,24 @@ Based on the CPU server profile of "large memory, large cache, modest compute," 
 ## 🤖 Supported Models
 - ✅ Qwen3 series and Qwen3-MoE configs used by the current execution path
 - ✅ Qwen3.6 config ingestion for the official nested `text_config` format (`qwen3_5` / `qwen3_5_moe`) and renamed MoE fields
-- ⚠️ Qwen3.6 runtime generation is guarded for now: official Qwen3.6 uses `linear_attention` / Gated DeltaNet layers, which are parsed but not yet implemented as executable operators in eLLM
+- ✅ Dense Qwen3.6 text runtime path (`qwen3_5_text`) with scalar-correct Gated DeltaNet `linear_attention`, output-gated `full_attention`, dense MLP routing, and real parameter tensor injection through `Model::new_with_parameters`
+- ⚠️ Qwen3.6 MoE/shared-expert runtime (`qwen3_5_moe_text`, including A3B-style shared experts) is still guarded so it cannot silently execute through the wrong architecture
 - ✅ MiniMax M2.5
+
+### Qwen3.6 Apple Silicon Benchmark
+Run the dense Qwen3.6 runtime smoke benchmark with:
+
+```bash
+QWEN36_BENCH_ITERS=200 cargo run --release --bin qwen36_bench
+```
+
+Latest local Apple Silicon M5 Air result for the synthetic tiny dense Qwen3.6-shaped config (`2` layers, `seq=16`, `batch=3`, scalar correctness path):
+
+| Mode | Iterations | Tokens/s |
+|---|---:|---:|
+| Release | 200 | 69,274 |
+
+This benchmark proves the implemented Qwen3.6 operators execute end to end on Apple Silicon. It is not an official Qwen3.6 27B/35B checkpoint tokens/s number and should not be compared with production model throughput.
 
 ## Experiments
 The minimum viable prototype of eLLM is now complete. To validate its performance potential, we designed both short-context and long-context experiments, evaluated Prefill and Decode separately, and compared a single CPU server with an inference node built from 8 GPUs. In short-context inference, CPUs are clearly behind GPUs. In long-context inference, eLLM may pull ahead by leveraging CPU memory capacity.
@@ -86,10 +102,10 @@ The minimum viable prototype of eLLM is now complete. To validate its performanc
 ### Notes on the Experiments
 - The current focus is **benchmarking and systems performance evaluation**.
 - **Operator-level** tests and alignment have been completed, which shows that the underlying execution path is basically functional.
-- Apple Silicon validation currently covers build, operator, and model-path tests on macOS ARM64, including FP16 NEON matrix kernels and Qwen3.6 config parsing. It does not yet provide an end-to-end tokens/second generation number.
+- Apple Silicon validation currently covers build, operator, model-path, and synthetic benchmark tests on macOS ARM64, including FP16 NEON matrix kernels and the dense Qwen3.6 scalar runtime path.
 - **Model-level** outputs are not yet fully consistent with the reference implementation.
-  - The current setup uses **randomly initialized parameters** and has not yet been connected to real model weights.
-  - **Attention** and **tokenization** are not included at this stage.
+  - Parameter tensors can be injected into the model cache, but full tokenizer/API generation and Hugging Face numerical parity checks are still incomplete.
+  - Qwen3.6 dense attention variants are executable; Qwen3.6 MoE/shared-expert execution remains guarded.
 
 #### Short-Text Experiment (Completed)
 

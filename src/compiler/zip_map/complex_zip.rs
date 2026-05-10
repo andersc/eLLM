@@ -81,14 +81,6 @@ where
             unsafe {
                 // 遍历每个chunk;
 
-                println!(
-                    "thread_id: {}, begin: {}, end: {}",
-                    thread_id,
-                    begin,
-                    end,
-                    // self.chunks.len()
-                );
-
                 let ptr1 = if self.output_to_kv {
                     self.ptr1
                         .ptr
@@ -103,11 +95,6 @@ where
                 for _ in begin..end {
                     let index = (high_index * max_stride + row_index * self.head_num + col_index)
                         * self.head_size;
-                    println!(
-                        " high_index: {}, row_index: {}, col_index: {}, index: {}",
-                        high_index, row_index, col_index, index
-                    );
-
                     // Print values from self.ptr1 as slice
 
                     // let slice = std::slice::from_raw_parts(ptr1.add(index), self.head_size);
