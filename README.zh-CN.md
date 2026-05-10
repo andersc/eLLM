@@ -58,7 +58,26 @@ eLLM 适合以 **Prefill** 为主的长文本推理任务，尤其适合需要�
 
 ## 🤖 支持模型
 - ✅ Qwen3 系列
+- ✅ Qwen3.6 配置解析、dense runtime 路径，以及 Qwen3.6-35B-A3B 形状的 MoE/shared-expert CPU runtime smoke 路径
 - ✅ MiniMax M2.5
+
+### OpenAI 兼容本地端点
+
+用于 opencode、OpenAI SDK 兼容客户端等 coding-agent 集成测试时，可以启动本地 chat endpoint：
+
+```bash
+cargo run --bin ellm_agent_server
+```
+
+默认连接信息：
+
+| 设置 | 值 |
+|---|---|
+| Base URL | `http://127.0.0.1:8000/v1` |
+| Model | `ellm-qwen36-a3b-smoke` |
+| Health check | `http://127.0.0.1:8000/health` |
+
+该端点实现 `/v1/models` 与 `/v1/chat/completions`，支持 streaming 与 non-streaming 响应。每次 chat 请求都会执行已验证的 Qwen3.6-35B-A3B 形状 CPU runtime smoke 路径，适合验证 OpenAI 兼容客户端接线；在接入官方 Qwen3.6-35B-A3B 权重和 tokenizer 前，它不是具备真实代码生成质量的模型。
 
 ## 实验
 截至目前，eLLM 的最小原型已经完成。为验证它的性能潜力，我们设计了短文本与长文本两类实验，并分别考察 Prefill 和 Decode 两个阶段，比较单块 CPU 服务器与由 8 块 GPU 组成的推理节点在不同场景下的表现。短文本推理场景下，CPU 明显落后于 GPU；但在长文本推理场景下，eLLM 有机会凭借 CPU 的大内存优势实现反超。

@@ -93,6 +93,24 @@ Latest local Apple Silicon M5 Air result for the synthetic tiny A3B-shaped confi
 
 This proves the A3B MoE/shared-expert runtime path executes, including the official fused `experts.gate_up_proj`, `experts.down_proj`, `shared_expert`, and `shared_expert_gate` structure. It is not an official Qwen3.6-35B-A3B checkpoint benchmark; no official 35B-A3B weights are included in this repository.
 
+### OpenAI-Compatible Local Endpoint
+
+For coding-agent integration tests (opencode, OpenAI SDK-compatible clients, etc.), run the local chat endpoint with:
+
+```bash
+cargo run --bin ellm_agent_server
+```
+
+Default connection settings:
+
+| Setting | Value |
+|---|---|
+| Base URL | `http://127.0.0.1:8000/v1` |
+| Model | `ellm-qwen36-a3b-smoke` |
+| Health check | `http://127.0.0.1:8000/health` |
+
+The endpoint implements `/v1/models` and `/v1/chat/completions` with streaming and non-streaming responses. Each chat request executes the validated Qwen3.6-35B-A3B-shaped CPU runtime smoke path, so it is useful for OpenAI-compatible client wiring tests. It is not a real Qwen3.6 code-generation model until official Qwen3.6-35B-A3B weights and tokenizer loading are added.
+
 ## Experiments
 The minimum viable prototype of eLLM is now complete. To validate its performance potential, we designed both short-context and long-context experiments, evaluated Prefill and Decode separately, and compared a single CPU server with an inference node built from 8 GPUs. In short-context inference, CPUs are clearly behind GPUs. In long-context inference, eLLM may pull ahead by leveraging CPU memory capacity.
 
