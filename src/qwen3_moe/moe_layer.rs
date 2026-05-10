@@ -5,12 +5,14 @@ use std::rc::Rc;
 use crate::kernel::generic::sigmoid::Sigmoid;
 use crate::kernel::generic::sqrt::Sqrt;
 use crate::kernel::generic::{exp::Exp, neg_infinity::NegInfinity};
+use crate::kernel::generic::from_f32::FromF32;
 
 use super::super::memory::cache::Cache;
 use super::super::ptensor::tensor::Tensor;
 use crate::compiler::operator::Operator;
 
 use super::mlp::MLP;
+use super::qwen36_moe::Qwen36MoeBlock;
 use super::sparse_moe_block::SparseMoeBlock;
 
 #[derive(Clone)]
@@ -19,6 +21,7 @@ where
     T: Copy + PartialOrd,
 {
     MLP(MLP<T>),
+    Qwen36Moe(Qwen36MoeBlock<T>),
     SparseMoe(SparseMoeBlock<T>),
 }
 
@@ -33,6 +36,7 @@ where
         + NegInfinity
         + Sigmoid<T>
         + Sqrt
+        + FromF32
         + AddAssign,
 {
     pub fn new_mlp(
@@ -74,6 +78,24 @@ where
         ))
     }
 
+    pub fn new_qwen36_moe(
+        config: &super::config::Config,
+        sequence_length: usize,
+        batch_size: usize,
+        parent_scope_name: &str,
+        cache: Rc<RefCell<Cache<T>>>,
+        operator_queue: Rc<RefCell<Vec<Operator<T>>>>,
+    ) -> Self {
+        MoeLayer::Qwen36Moe(Qwen36MoeBlock::new(
+            config,
+            sequence_length,
+            batch_size,
+            parent_scope_name,
+            cache,
+            operator_queue,
+        ))
+    }
+
     pub fn forward(
         &self,
         hidden_states: &Tensor<T>,
@@ -82,6 +104,7 @@ where
     ) -> Tensor<T> {
         match self {
             MoeLayer::MLP(mlp) => mlp.forward(hidden_states, residual, tensor_name),
+            MoeLayer::Qwen36Moe(moe) => moe.forward(hidden_states, residual, tensor_name),
             MoeLayer::SparseMoe(sparse_moe) => {
                 sparse_moe.forward(hidden_states, residual, tensor_name)
             }
@@ -93,7 +116,7 @@ where
     }
 
     pub fn is_sparse_moe(&self) -> bool {
-        matches!(self, MoeLayer::SparseMoe(_))
+        matches!(self, MoeLayer::SparseMoe(_) | MoeLayer::Qwen36Moe(_))
     }
 
     pub fn as_mlp(&self) -> Option<&MLP<T>> {

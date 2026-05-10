@@ -177,13 +177,7 @@ impl Config {
     }
 
     pub fn unsupported_runtime_reason(&self) -> Option<&'static str> {
-        if self.model_type == "qwen3_5_moe_text" {
-            Some(
-                "Qwen3.6 MoE shared-expert execution is not implemented in eLLM yet; dense Qwen3.6 text runtime is supported.",
-            )
-        } else {
-            None
-        }
+        None
     }
 
     pub fn linear_key_dim(&self) -> usize {

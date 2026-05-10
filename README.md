@@ -61,7 +61,7 @@ Based on the CPU server profile of "large memory, large cache, modest compute," 
 - ✅ Qwen3 series and Qwen3-MoE configs used by the current execution path
 - ✅ Qwen3.6 config ingestion for the official nested `text_config` format (`qwen3_5` / `qwen3_5_moe`) and renamed MoE fields
 - ✅ Dense Qwen3.6 text runtime path (`qwen3_5_text`) with scalar-correct Gated DeltaNet `linear_attention`, output-gated `full_attention`, dense MLP routing, and real parameter tensor injection through `Model::new_with_parameters`
-- ⚠️ Qwen3.6 MoE/shared-expert runtime (`qwen3_5_moe_text`, including A3B-style shared experts) is still guarded so it cannot silently execute through the wrong architecture
+- ✅ Qwen3.6 MoE/shared-expert runtime path (`qwen3_5_moe_text`, including A3B-style routed experts plus shared expert) with scalar-correct execution for validation and bring-up
 - ✅ MiniMax M2.5
 
 ### Qwen3.6 Apple Silicon Benchmark
@@ -78,6 +78,20 @@ Latest local Apple Silicon M5 Air result for the synthetic tiny dense Qwen3.6-sh
 | Release | 200 | 69,274 |
 
 This benchmark proves the implemented Qwen3.6 operators execute end to end on Apple Silicon. It is not an official Qwen3.6 27B/35B checkpoint tokens/s number and should not be compared with production model throughput.
+
+Run the Qwen3.6-35B-A3B-shaped MoE smoke benchmark with:
+
+```bash
+QWEN36_A3B_BENCH_ITERS=200 cargo run --release --bin qwen36_a3b_bench
+```
+
+Latest local Apple Silicon M5 Air result for the synthetic tiny A3B-shaped config (`2` layers, `4` experts, top-`2`, `seq=16`, `batch=3`, scalar correctness path):
+
+| Mode | Iterations | Tokens/s |
+|---|---:|---:|
+| Release | 200 | 40,453 |
+
+This proves the A3B MoE/shared-expert runtime path executes, including the official fused `experts.gate_up_proj`, `experts.down_proj`, `shared_expert`, and `shared_expert_gate` structure. It is not an official Qwen3.6-35B-A3B checkpoint benchmark; no official 35B-A3B weights are included in this repository.
 
 ## Experiments
 The minimum viable prototype of eLLM is now complete. To validate its performance potential, we designed both short-context and long-context experiments, evaluated Prefill and Decode separately, and compared a single CPU server with an inference node built from 8 GPUs. In short-context inference, CPUs are clearly behind GPUs. In long-context inference, eLLM may pull ahead by leveraging CPU memory capacity.
@@ -107,7 +121,7 @@ The minimum viable prototype of eLLM is now complete. To validate its performanc
 - Apple Silicon validation currently covers build, operator, model-path, and synthetic benchmark tests on macOS ARM64, including FP16 NEON matrix kernels and the dense Qwen3.6 scalar runtime path.
 - **Model-level** outputs are not yet fully consistent with the reference implementation.
   - Parameter tensors can be injected into the model cache, but full tokenizer/API generation and Hugging Face numerical parity checks are still incomplete.
-  - Qwen3.6 dense attention variants are executable; Qwen3.6 MoE/shared-expert execution remains guarded.
+  - Qwen3.6 dense and A3B-shaped MoE attention/MLP variants are executable in scalar validation paths; production optimized kernels and full official-checkpoint parity remain future work.
 
 #### Short-Text Experiment (Completed)
 

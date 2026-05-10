@@ -4,6 +4,7 @@ pub mod gated_delta_net;
 pub mod mlp;
 pub mod moe_layer;
 pub mod qwen36_attention;
+pub mod qwen36_moe;
 pub mod sparse_moe_block;
 pub mod decoder_layer;
 pub mod model;

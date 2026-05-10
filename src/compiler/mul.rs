@@ -9,4 +9,5 @@ pub mod matmul_add;
 pub mod matmul_topk;
 pub mod qwen36_full_attention;
 pub mod qwen36_gated_delta;
+pub mod qwen36_moe;
 // pub mod matmul_silu_mul_matmul;

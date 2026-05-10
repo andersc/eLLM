@@ -138,7 +138,19 @@ where
                 )),
             },
             
-            moe_layer: if config.num_experts > 0
+            moe_layer: if config.model_type == "qwen3_5_moe_text"
+                && config.num_experts > 0
+                && config.num_experts_per_tok > 0
+            {
+                MoeLayer::new_qwen36_moe(
+                    config,
+                    sequence_chunk_size,
+                    batch_size,
+                    &scope_name,
+                    cache.clone(),
+                    operator_queue.clone(),
+                )
+            } else if config.num_experts > 0
                 && config.num_experts_per_tok > 0
                 && !config.mlp_only_layers.contains(&layer_idx)
                 && (layer_idx + 1) % config.decoder_sparse_step == 0
