@@ -1,10 +1,10 @@
-use core_affinity;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
 // use hurdles::Barrier;
 use crate::runtime::barrier::Barrier;
+use crate::runtime::cpu_topology::CpuTopology;
 // use serde::{Deserialize, Serialize};
 use std::ops::{AddAssign, Neg, Sub};
 
@@ -37,14 +37,20 @@ where
     println!("start");
     // let prompt_operator_num;
     // let data = SyncUnsafeCell::new(DataReader::new(prompt_data));
-    let thread_num = thread::available_parallelism().unwrap().get();
+    let topology = CpuTopology::discover();
+    let placements = topology.worker_placements();
+    let thread_num = placements.len();
+    println!(
+        "runtime workers: {}, cpu sockets: {}",
+        thread_num,
+        topology.socket_count()
+    );
     let sync_operator_queue = Arc::new(operator_queue);
 
     let barrier = Arc::new(Barrier::new(thread_num));
 
     let mut handles = Vec::with_capacity(thread_num);
-    let core_ids = core_affinity::get_core_ids().unwrap();
-    for (i, core_id) in core_ids.into_iter().enumerate() {
+    for placement in placements {
         // println!("thread id {}", i);
         // let _state = &state;
         // let _prompt_begin = &prompt_begin;
@@ -60,8 +66,10 @@ where
         // let decode_start = 40;
 
         let handle = thread::spawn(move || {
-            let thread_id = i;
-            core_affinity::set_for_current(core_id);
+            let thread_id = placement.thread_id;
+            if let Some(core_id) = placement.core_id {
+                core_affinity::set_for_current(core_id);
+            }
             // let mut counter = 0;
 
             // 预先创建子切片，避免在热循环中重复操作
@@ -76,7 +84,14 @@ where
                 }
             }
             let t = s.elapsed();
-                println!("thread {} decode time {:?}", thread_id, t);
+            println!(
+                "thread {} socket {} ({}/{}) decode time {:?}",
+                thread_id,
+                placement.socket_id,
+                placement.socket_thread_id + 1,
+                placement.socket_thread_count,
+                t
+            );
         });
 
         // std::mem::forget(handle);

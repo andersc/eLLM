@@ -17,7 +17,7 @@
 - **GPU-consistent behavior**: Targets the same numerical results and runtime behavior as GPU inference
 
 ## Hardware Requirements (No GPU/NPU Required)
-- **CPU**: Intel Xeon 4th Gen or newer with AMX support for the primary server path; Apple Silicon M-series CPUs are supported on macOS through ARM64 FP16 NEON kernels and generic CPU fallbacks
+- **CPU**: Intel Xeon 4th Gen or newer with AMX support for the primary server path; Apple Silicon M-series CPUs are supported on macOS through ARM64 FP16 NEON kernels and generic CPU fallbacks. Multi-socket CPU servers are supported through socket-aware worker placement on Linux.
 - **Memory**: Enough DDR5 capacity; no HBM required
 
 ## ✨ Advantages
@@ -54,6 +54,8 @@ Based on the CPU server profile of "large memory, large cache, modest compute," 
   Reserve very large token and sequence dimensions to build an effectively "unbounded" KV tensor. This supports full Prefill in one pass and helps avoid repeated Prefill and repeated parameter loading, making it suitable for ultra-long prompts and long-lived contexts.
 - **⚡ Head-by-head attention computation (FlashAttention)**
   During Prefill, the basic compute unit is a single token on a single KV head. The CPU finishes one head before moving to the next. This matches CPU hardware well: limited core counts, but large caches. The goal is to keep one head's KV data resident in cache as long as possible and reduce repeated memory loads.
+- **Multi-CPU parallel execution**
+  The runtime discovers available CPU cores, groups them by Linux physical package/socket when that topology is available, pins worker threads to cores, and passes a global `cpu_num` / `thread_id` into every operator. This lets matmul, attention, MoE, and map operators use all workers across multiple CPUs. Set `ELLM_NUM_THREADS=<n>` to cap the worker count; the cap is balanced across sockets instead of filling one socket first. NUMA-local memory placement is still a future optimization, so the current implementation is compute-placement aware rather than full memory-placement aware.
 
 ## 🤖 Supported Models
 - ✅ Qwen3 series and Qwen3-MoE configs used by the current execution path
