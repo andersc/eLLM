@@ -1,5 +1,5 @@
 # eLLM：让 LLM 推理在 CPUs 上快过 GPUs
-## eLLM：让 CPU（Xeon/EPYC）成为 AI 推理芯片的首选
+## eLLM：让 CPU（Xeon/EPYC/Apple Silicon ARM）成为 AI 推理芯片的首选
 👉 项目主页：[https://github.com/lucienhuangfu/eLLM](https://github.com/lucienhuangfu/eLLM)  
 🌐 语言版本：[English](README.md) | [简体中文](README.zh-CN.md)  
 🎓 目前仅开放 1–2 个 Trainee 名额，欢迎计算机专业在校生报名  
@@ -11,13 +11,13 @@
 - `v0.0.1`（2025-12-20）：项目开源
 
 ## 🔑 功能
-**eLLM**：专为 **CPU 服务器**打造的大模型推理框架
-- **纯 CPU 推理**：运行在 **CPU 服务器**（Xeon/EPYC）上，**无需 GPU/NPU**
+**eLLM**：专为 **CPU 服务器与 Apple Silicon ARM Mac** 打造的大模型推理框架
+- **纯 CPU 推理**：运行在 **CPU 服务器**（Xeon/EPYC）和 **Apple Silicon M 系列 CPU** 上，**无需 GPU/NPU**
 - **兼容 vLLM API**：可无缝接入现有生态
 - **与 GPU 一致的推理**：在数值结果和运行行为上与 GPU 推理一致
 
 ## 硬件要求（无需 GPU/NPU）
-- **CPU**：Intel Xeon Gen4 及以上（支持 AMX 指令集）
+- **CPU**：Intel Xeon Gen4 及以上（支持 AMX 指令集）；macOS 上支持 Apple Silicon M 系列 CPU（ARM64 FP16 NEON 内核与通用 CPU 回退路径）
 - **内存**：足量的 DDR5（无需 HBM）
 
 ## ✨ 优势
