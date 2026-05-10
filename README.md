@@ -1,5 +1,5 @@
 # eLLM: Run LLM Inference on CPUs Faster Than on GPUs
-## eLLM Makes CPUs (Xeon/EPYC) the Best Inference AI Chips
+## eLLM Makes CPUs (Xeon/EPYC/Apple Silicon ARM) the Best Inference AI Chips
 👉 Project home: [https://github.com/lucienhuangfu/eLLM](https://github.com/lucienhuangfu/eLLM)  
 🌐 Languages: [English](README.md) | [简体中文](README.zh-CN.md)  
 🎓 We currently have 1-2 trainee openings and welcome applications from computer science students  
@@ -11,8 +11,8 @@
 - `v0.0.1` (2025-12-20): Open-sourced the project
 
 ## 🔑 Highlights
-**eLLM** is an LLM inference framework built specifically for **CPU servers**.
-- **Pure CPU inference**: Runs on **CPU servers** (Xeon / EPYC) with **no GPU or NPU required**
+**eLLM** is an LLM inference framework built specifically for **CPU servers and Apple Silicon ARM Macs**.
+- **Pure CPU inference**: Runs on **CPU servers** (Xeon / EPYC) and **Apple Silicon M-series CPUs** with **no GPU or NPU required**
 - **vLLM API compatible**: Works smoothly with the existing ecosystem
 - **GPU-consistent behavior**: Targets the same numerical results and runtime behavior as GPU inference
 
