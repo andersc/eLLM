@@ -74,10 +74,27 @@ cargo run --bin ellm_agent_server
 | 设置 | 值 |
 |---|---|
 | Base URL | `http://127.0.0.1:8000/v1` |
-| Model | `ellm-qwen36-a3b-smoke` |
+| Model | 默认 `ellm-qwen36-a3b-smoke`；设置 `ELLM_MODEL_DIR` 后为 `Qwen/Qwen3.6-35B-A3B` |
 | Health check | `http://127.0.0.1:8000/health` |
 
-该端点实现 `/v1/models` 与 `/v1/chat/completions`，支持 streaming 与 non-streaming 响应。每次 chat 请求都会执行已验证的 Qwen3.6-35B-A3B 形状 CPU runtime smoke 路径，适合验证 OpenAI 兼容客户端接线；在接入官方 Qwen3.6-35B-A3B 权重和 tokenizer 前，它不是具备真实代码生成质量的模型。
+该端点实现 `/v1/models` 与 `/v1/chat/completions`，支持 streaming 与 non-streaming 响应。未设置 `ELLM_MODEL_DIR` 时，每次 chat 请求都会执行已验证的 Qwen3.6-35B-A3B 形状 CPU runtime smoke 路径，适合验证 OpenAI 兼容客户端接线。
+
+如需加载官方 Qwen3.6 权重，请先下载 Hugging Face 上的 `Qwen/Qwen3.6-35B-A3B` snapshot，并将 endpoint 指向本地目录：
+
+```bash
+huggingface-cli download Qwen/Qwen3.6-35B-A3B \
+  --local-dir models/Qwen3.6-35B-A3B
+
+ELLM_MODEL_DIR=models/Qwen3.6-35B-A3B \
+ELLM_MODEL_ID=Qwen/Qwen3.6-35B-A3B \
+ELLM_MAX_CONTEXT=128 \
+ELLM_MAX_GENERATION_TOKENS=16 \
+cargo run --release --bin ellm_agent_server
+```
+
+官方 loader 会读取 `config.json`、`tokenizer.json`、`tokenizer_config.json` / `chat_template.jinja`、`model.safetensors.index.json` 以及所有分片 `*.safetensors`，并将 Qwen3.6-35B-A3B 官方使用的 `model.language_model.*` tensor 前缀和 `mlp.experts.down_proj` 命名归一化后注入 runtime。完整 35B-A3B checkpoint 的 safetensors 约 72 GB，未计 runtime/KV 额外内存，因此需要显著大于 32 GB 笔记本的内存容量。
+
+这条 eLLM 路径目前会把官方 FP16/BF16/F32 safetensors 加载进 CPU runtime。量化的 4-bit MLX/GGUF/AWQ/GPTQ checkpoint 不能直接与该 loader 互换；要由 eLLM 本身 serving，需要先实现对应的 packed-weight kernel。
 
 ## 实验
 截至目前，eLLM 的最小原型已经完成。为验证它的性能潜力，我们设计了短文本与长文本两类实验，并分别考察 Prefill 和 Decode 两个阶段，比较单块 CPU 服务器与由 8 块 GPU 组成的推理节点在不同场景下的表现。短文本推理场景下，CPU 明显落后于 GPU；但在长文本推理场景下，eLLM 有机会凭借 CPU 的大内存优势实现反超。
