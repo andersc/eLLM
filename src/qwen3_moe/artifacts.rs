@@ -4,7 +4,6 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use minijinja::{context, Environment};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokenizers::Tokenizer;
@@ -69,21 +68,7 @@ impl Qwen36Artifacts {
         add_generation_prompt: bool,
         enable_thinking: bool,
     ) -> Result<String> {
-        let mut env = Environment::new();
-        env.add_template("chat", &self.chat_template)
-            .context("failed to compile chat template")?;
-        let template = env.get_template("chat")?;
-        let tools: Vec<Value> = Vec::new();
-        template
-            .render(context! {
-                messages => messages,
-                tools => tools,
-                add_generation_prompt => add_generation_prompt,
-                add_vision_id => false,
-                enable_thinking => enable_thinking,
-                preserve_thinking => false,
-            })
-            .context("failed to render chat template")
+        render_qwen36_text_chat_prompt(messages, add_generation_prompt, enable_thinking)
     }
 
     pub fn encode_chat(
@@ -135,9 +120,11 @@ impl Qwen36Artifacts {
         let mut bytes = self.safetensors.estimated_f16_weight_bytes()?;
 
         if self.config.tie_word_embeddings {
-            let has_lm_head = self.safetensors.tensor_infos()?.iter().any(|tensor| {
-                normalize_qwen36_weight_name(&tensor.name) == "lm_head.weight"
-            });
+            let has_lm_head = self
+                .safetensors
+                .tensor_infos()?
+                .iter()
+                .any(|tensor| normalize_qwen36_weight_name(&tensor.name) == "lm_head.weight");
             if !has_lm_head {
                 let tied_embedding_bytes = self
                     .config
@@ -147,7 +134,9 @@ impl Qwen36Artifacts {
                     .ok_or_else(|| anyhow!("tied embedding tensor is too large"))?;
                 bytes = bytes
                     .checked_add(tied_embedding_bytes as u64)
-                    .ok_or_else(|| anyhow!("model is too large to estimate runtime weight bytes"))?;
+                    .ok_or_else(|| {
+                        anyhow!("model is too large to estimate runtime weight bytes")
+                    })?;
             }
         }
 
@@ -161,6 +150,85 @@ impl Qwen36Artifacts {
     pub fn safetensors_files(&self) -> &[String] {
         self.safetensors.model_files()
     }
+}
+
+fn render_qwen36_text_chat_prompt(
+    messages: &[ChatTemplateMessage],
+    add_generation_prompt: bool,
+    enable_thinking: bool,
+) -> Result<String> {
+    if messages.is_empty() {
+        return Err(anyhow!("no messages provided"));
+    }
+
+    let mut prompt = String::new();
+    for (index, message) in messages.iter().enumerate() {
+        if message.role == "system" && index != 0 {
+            return Err(anyhow!("system message must be the first message"));
+        }
+
+        let content = qwen36_text_content(&message.content)?;
+        match message.role.as_str() {
+            "system" | "user" => {
+                prompt.push_str("<|im_start|>");
+                prompt.push_str(&message.role);
+                prompt.push('\n');
+                prompt.push_str(content.trim());
+                prompt.push_str("<|im_end|>\n");
+            }
+            "assistant" => {
+                prompt.push_str("<|im_start|>assistant\n");
+                prompt.push_str(strip_qwen36_reasoning(&content).trim_start());
+                prompt.push_str("<|im_end|>\n");
+            }
+            "tool" => {
+                prompt.push_str("<|im_start|>user\n<tool_response>\n");
+                prompt.push_str(content.trim());
+                prompt.push_str("\n</tool_response><|im_end|>\n");
+            }
+            role => return Err(anyhow!("unsupported chat message role: {role}")),
+        }
+    }
+
+    if add_generation_prompt {
+        prompt.push_str("<|im_start|>assistant\n");
+        if enable_thinking {
+            prompt.push_str("<think>\n");
+        } else {
+            prompt.push_str("<think>\n\n</think>\n\n");
+        }
+    }
+
+    Ok(prompt)
+}
+
+fn qwen36_text_content(content: &Value) -> Result<String> {
+    match content {
+        Value::String(text) => Ok(text.clone()),
+        Value::Null => Ok(String::new()),
+        Value::Array(parts) => {
+            let mut text_parts = Vec::new();
+            for part in parts {
+                let Some(part_text) = part.get("text").and_then(Value::as_str) else {
+                    return Err(anyhow!(
+                        "only text content parts are supported by the eLLM Qwen3.6 endpoint"
+                    ));
+                };
+                text_parts.push(part_text);
+            }
+            Ok(text_parts.join("\n"))
+        }
+        _ => Err(anyhow!(
+            "unsupported message content type for the eLLM Qwen3.6 endpoint"
+        )),
+    }
+}
+
+fn strip_qwen36_reasoning(content: &str) -> &str {
+    content
+        .split_once("</think>")
+        .map(|(_, answer)| answer)
+        .unwrap_or(content)
 }
 
 pub fn validate_qwen36_config(config: &Config) -> Result<()> {
@@ -508,6 +576,22 @@ mod tests {
             )
             .unwrap();
         assert!(prompt.contains("<|im_start|>assistant"));
+        assert!(prompt.contains("<think>\n\n</think>\n\n"));
+
+        let prompt = artifacts
+            .render_chat_prompt(
+                &[ChatTemplateMessage {
+                    role: "user".to_string(),
+                    content: serde_json::json!([
+                        {"type": "text", "text": "hello"},
+                        {"type": "text", "text": "world"}
+                    ]),
+                }],
+                true,
+                false,
+            )
+            .unwrap();
+        assert!(prompt.contains("hello\nworld"));
 
         let weights = artifacts.load_normalized_weights_f16().unwrap();
         assert!(weights.contains_key("model.embed_tokens.weight"));

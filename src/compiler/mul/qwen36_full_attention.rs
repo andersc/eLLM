@@ -101,31 +101,38 @@ where
 {
     pub fn run(
         &self,
-        _position_index: usize,
-        _position_interval: usize,
-        _batch_size: usize,
+        position_index: usize,
+        position_interval: usize,
+        batch_size: usize,
         cpu_num: usize,
         thread_id: usize,
     ) {
-        let Some((begin, end)) = crate::compiler::assign::assign(self.batch_size, cpu_num, thread_id) else {
+        let Some(active_len) =
+            active_prefix_len(position_index, position_interval, self.sequence_length)
+        else {
+            return;
+        };
+        let batch_size = batch_size.min(self.batch_size);
+        let Some((begin, end)) = crate::compiler::assign::assign(batch_size, cpu_num, thread_id)
+        else {
             return;
         };
 
         for batch in begin..end {
-            self.run_batch(batch);
+            self.run_batch(batch, active_len);
         }
     }
 
-    fn run_batch(&self, batch: usize) {
+    fn run_batch(&self, batch: usize, active_len: usize) {
         let q_dim = self.num_attention_heads * self.head_dim;
         let kv_dim = self.num_key_value_heads * self.head_dim;
         let groups = self.num_attention_heads / self.num_key_value_heads;
-        let mut q = vec![0.0f32; self.sequence_length * q_dim];
-        let mut gate = vec![0.0f32; self.sequence_length * q_dim];
-        let mut k = vec![0.0f32; self.sequence_length * kv_dim];
-        let mut v = vec![0.0f32; self.sequence_length * kv_dim];
+        let mut q = vec![0.0f32; active_len * q_dim];
+        let mut gate = vec![0.0f32; active_len * q_dim];
+        let mut k = vec![0.0f32; active_len * kv_dim];
+        let mut v = vec![0.0f32; active_len * kv_dim];
 
-        for t in 0..self.sequence_length {
+        for t in 0..active_len {
             let input_offset = (t * self.batch_size + batch) * self.hidden_size;
             let mut q_raw = vec![0.0f32; q_dim * 2];
             let mut k_raw = vec![0.0f32; kv_dim];
@@ -164,15 +171,11 @@ where
                     self.head_dim,
                     self.rms_norm_eps,
                 );
-                apply_rope(
-                    &mut q_head,
-                    t,
-                    self.rope_theta,
-                    self.partial_rotary_factor,
-                );
+                apply_rope(&mut q_head, t, self.rope_theta, self.partial_rotary_factor);
                 q[out_offset..out_offset + self.head_dim].copy_from_slice(&q_head);
-                gate[out_offset..out_offset + self.head_dim]
-                    .copy_from_slice(&q_raw[raw_offset + self.head_dim..raw_offset + self.head_dim * 2]);
+                gate[out_offset..out_offset + self.head_dim].copy_from_slice(
+                    &q_raw[raw_offset + self.head_dim..raw_offset + self.head_dim * 2],
+                );
             }
 
             for head in 0..self.num_key_value_heads {
@@ -184,12 +187,7 @@ where
                     self.head_dim,
                     self.rms_norm_eps,
                 );
-                apply_rope(
-                    &mut k_head,
-                    t,
-                    self.rope_theta,
-                    self.partial_rotary_factor,
-                );
+                apply_rope(&mut k_head, t, self.rope_theta, self.partial_rotary_factor);
                 k[out_offset..out_offset + self.head_dim].copy_from_slice(&k_head);
                 v[out_offset..out_offset + self.head_dim]
                     .copy_from_slice(&v_raw[head * self.head_dim..(head + 1) * self.head_dim]);
@@ -198,7 +196,7 @@ where
 
         let mut attention_out = vec![0.0f32; q_dim];
         let mut projected = vec![0.0f32; self.hidden_size];
-        for t in 0..self.sequence_length {
+        for t in 0..active_len {
             attention_out.fill(0.0);
             for head in 0..self.num_attention_heads {
                 let kv_head = head / groups;
@@ -216,7 +214,8 @@ where
                 for source_t in 0..=t {
                     let v_offset = source_t * kv_dim + kv_head * self.head_dim;
                     for d in 0..self.head_dim {
-                        attention_out[head * self.head_dim + d] += scores[source_t] * v[v_offset + d];
+                        attention_out[head * self.head_dim + d] +=
+                            scores[source_t] * v[v_offset + d];
                     }
                 }
                 for d in 0..self.head_dim {
@@ -248,6 +247,21 @@ where
     }
 }
 
+fn active_prefix_len(
+    position_index: usize,
+    position_interval: usize,
+    sequence_length: usize,
+) -> Option<usize> {
+    if position_interval == 0 || sequence_length == 0 {
+        return None;
+    }
+
+    let active_len = position_index
+        .saturating_add(position_interval)
+        .min(sequence_length);
+    (active_len > 0).then_some(active_len)
+}
+
 unsafe fn matvec<T: Scalar>(
     input_ptr: *const T,
     weight_ptr: *const T,
@@ -258,8 +272,8 @@ unsafe fn matvec<T: Scalar>(
     for row in 0..output_dim {
         let mut acc = 0.0f32;
         for col in 0..input_dim {
-            acc += (*input_ptr.add(col)).to_f32()
-                * (*weight_ptr.add(row * input_dim + col)).to_f32();
+            acc +=
+                (*input_ptr.add(col)).to_f32() * (*weight_ptr.add(row * input_dim + col)).to_f32();
         }
         output[row] = acc;
     }
@@ -274,7 +288,8 @@ fn rms_norm_head<T: Scalar>(values: &mut [f32], weight_ptr: *const T, head_dim: 
 }
 
 fn apply_rope(values: &mut [f32], position: usize, theta: f32, partial_rotary_factor: f32) {
-    let mut rotary_dim = ((values.len() as f32 * partial_rotary_factor).round() as usize).min(values.len());
+    let mut rotary_dim =
+        ((values.len() as f32 * partial_rotary_factor).round() as usize).min(values.len());
     rotary_dim -= rotary_dim % 2;
     if rotary_dim == 0 {
         return;

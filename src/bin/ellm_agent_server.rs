@@ -45,6 +45,7 @@ struct OfficialRuntime {
     sequences: *mut usize,
     max_context: usize,
     max_generation_tokens: usize,
+    cpu_num: usize,
 }
 
 unsafe impl Send for OfficialRuntime {}
@@ -349,10 +350,11 @@ impl Backend {
             Self::Official(runtime) => {
                 let runtime = runtime.lock().unwrap();
                 format!(
-                    "Official Qwen3.6 artifacts loaded from {} with {} operators and max_context {}",
+                    "Official Qwen3.6 artifacts loaded from {} with {} operators, max_context {}, and {} runtime threads",
                     runtime.artifacts.model_dir.display(),
                     runtime.operator_queue.len(),
-                    runtime.max_context
+                    runtime.max_context,
+                    runtime.cpu_num
                 )
             }
         }
@@ -379,6 +381,7 @@ impl OfficialRuntime {
         max_context: usize,
         topk_size: usize,
         max_generation_tokens: usize,
+        cpu_num: usize,
     ) -> Result<Self> {
         let artifacts = Qwen36Artifacts::from_dir(model_dir)?;
         let max_context = max_context
@@ -404,6 +407,7 @@ impl OfficialRuntime {
             sequences,
             max_context,
             max_generation_tokens: max_generation_tokens.max(1),
+            cpu_num: cpu_num.max(1),
         })
     }
 
@@ -472,22 +476,13 @@ impl OfficialRuntime {
             }
         }
 
-        for position in 0..prompt.len() {
-            for operator in &self.operator_queue {
-                operator.run(position, 1, 1, 1, 0);
-            }
-            if position + 1 < prompt.len() {
-                unsafe {
-                    self.sequences
-                        .add(position + 1)
-                        .write(prompt[position + 1] as usize);
-                }
-            }
-        }
+        let mut known_tokens = prompt.to_vec();
+        self.run_active_prefix(known_tokens.len());
+        self.restore_known_tokens(&known_tokens);
 
         let mut generated = Vec::new();
         for _ in 0..max_new_tokens {
-            let next_position = prompt.len() + generated.len();
+            let next_position = known_tokens.len();
             if next_position >= self.max_context {
                 break;
             }
@@ -503,18 +498,68 @@ impl OfficialRuntime {
             if next_token as usize == self.artifacts.config.eos_token_id {
                 break;
             }
+            known_tokens.push(next_token);
 
-            let position = next_position;
-            if position >= self.max_context {
+            if generated.len() >= max_new_tokens || known_tokens.len() >= self.max_context {
                 break;
             }
-            for operator in &self.operator_queue {
-                operator.run(position, 1, 1, 1, 0);
-            }
+            self.run_active_prefix(known_tokens.len());
+            self.restore_known_tokens(&known_tokens);
         }
 
         Ok(generated)
     }
+
+    fn run_active_prefix(&self, active_len: usize) {
+        let active_len = active_len.min(self.max_context);
+        if active_len == 0 {
+            return;
+        }
+
+        for operator in &self.operator_queue {
+            run_official_operator(operator, 0, active_len, 1, self.cpu_num);
+        }
+    }
+
+    fn restore_known_tokens(&mut self, known_tokens: &[u32]) {
+        unsafe {
+            for (offset, token_id) in known_tokens.iter().enumerate().take(self.max_context) {
+                self.sequences.add(offset).write(*token_id as usize);
+            }
+        }
+    }
+}
+
+fn run_official_operator(
+    operator: &Operator<f16>,
+    position_index: usize,
+    position_interval: usize,
+    batch_size: usize,
+    cpu_num: usize,
+) {
+    let cpu_num = cpu_num.max(1);
+    let operator_batch = match operator {
+        Operator::MatMulTopK(_) => position_interval.saturating_mul(batch_size),
+        _ => batch_size,
+    };
+    if cpu_num == 1 {
+        operator.run(position_index, position_interval, operator_batch, 1, 0);
+        return;
+    }
+
+    std::thread::scope(|scope| {
+        for thread_id in 0..cpu_num {
+            scope.spawn(move || {
+                operator.run(
+                    position_index,
+                    position_interval,
+                    operator_batch,
+                    cpu_num,
+                    thread_id,
+                );
+            });
+        }
+    });
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -778,8 +823,20 @@ fn load_backend() -> Result<(String, Arc<Backend>)> {
     let max_context = read_env_usize("ELLM_MAX_CONTEXT").unwrap_or(128);
     let topk_size = read_env_usize("ELLM_TOPK").unwrap_or(8);
     let max_generation_tokens = read_env_usize("ELLM_MAX_GENERATION_TOKENS").unwrap_or(16);
-    let runtime =
-        OfficialRuntime::from_dir(&model_dir, max_context, topk_size, max_generation_tokens)?;
+    let available_threads = std::thread::available_parallelism()
+        .map(|threads| threads.get())
+        .unwrap_or(1)
+        .max(1);
+    let cpu_num = read_env_usize("ELLM_NUM_THREADS")
+        .unwrap_or(available_threads)
+        .clamp(1, available_threads);
+    let runtime = OfficialRuntime::from_dir(
+        &model_dir,
+        max_context,
+        topk_size,
+        max_generation_tokens,
+        cpu_num,
+    )?;
     let model_id = std::env::var("ELLM_MODEL_ID").unwrap_or_else(|_| OFFICIAL_MODEL_ID.to_string());
     Ok((model_id, Arc::new(Backend::Official(Mutex::new(runtime)))))
 }
@@ -852,7 +909,8 @@ mod tests {
         )
         .unwrap();
 
-        let mut runtime = OfficialRuntime::from_dir(&dir, 64, 4, 1).unwrap();
+        let mut runtime = OfficialRuntime::from_dir(&dir, 64, 4, 1, 2).unwrap();
+        assert_eq!(runtime.cpu_num, 2);
         let response = runtime
             .complete(&ChatCompletionRequest {
                 model: OFFICIAL_MODEL_ID.to_string(),

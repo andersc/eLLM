@@ -114,33 +114,40 @@ where
 {
     pub fn run(
         &self,
-        _position_index: usize,
-        _position_interval: usize,
-        _batch_size: usize,
+        position_index: usize,
+        position_interval: usize,
+        batch_size: usize,
         cpu_num: usize,
         thread_id: usize,
     ) {
-        let Some((begin, end)) = crate::compiler::assign::assign(self.batch_size, cpu_num, thread_id) else {
+        let Some(active_len) =
+            active_prefix_len(position_index, position_interval, self.sequence_length)
+        else {
+            return;
+        };
+        let batch_size = batch_size.min(self.batch_size);
+        let Some((begin, end)) = crate::compiler::assign::assign(batch_size, cpu_num, thread_id)
+        else {
             return;
         };
 
         for batch in begin..end {
-            self.run_batch(batch);
+            self.run_batch(batch, active_len);
         }
     }
 
-    fn run_batch(&self, batch: usize) {
+    fn run_batch(&self, batch: usize, active_len: usize) {
         let key_dim = self.num_key_heads * self.key_head_dim;
         let value_dim = self.num_value_heads * self.value_head_dim;
         let conv_dim = key_dim * 2 + value_dim;
         let head_ratio = self.num_value_heads / self.num_key_heads;
 
-        let mut projected_qkv = vec![0.0f32; self.sequence_length * conv_dim];
-        let mut projected_z = vec![0.0f32; self.sequence_length * value_dim];
-        let mut projected_b = vec![0.0f32; self.sequence_length * self.num_value_heads];
-        let mut projected_a = vec![0.0f32; self.sequence_length * self.num_value_heads];
+        let mut projected_qkv = vec![0.0f32; active_len * conv_dim];
+        let mut projected_z = vec![0.0f32; active_len * value_dim];
+        let mut projected_b = vec![0.0f32; active_len * self.num_value_heads];
+        let mut projected_a = vec![0.0f32; active_len * self.num_value_heads];
 
-        for t in 0..self.sequence_length {
+        for t in 0..active_len {
             let input_offset = (t * self.batch_size + batch) * self.hidden_size;
             unsafe {
                 matvec(
@@ -175,7 +182,7 @@ where
         }
 
         let mut mixed_qkv = vec![0.0f32; projected_qkv.len()];
-        for t in 0..self.sequence_length {
+        for t in 0..active_len {
             for c in 0..conv_dim {
                 let mut acc = 0.0f32;
                 for k in 0..self.conv_kernel_size {
@@ -184,15 +191,11 @@ where
                         continue;
                     }
                     let source_t = source_t as usize;
-                    if source_t >= self.sequence_length {
+                    if source_t >= active_len {
                         continue;
                     }
                     unsafe {
-                        let w = (*self
-                            .conv1d_ptr
-                            .ptr
-                            .add(c * self.conv_kernel_size + k))
-                        .to_f32();
+                        let w = (*self.conv1d_ptr.ptr.add(c * self.conv_kernel_size + k)).to_f32();
                         acc += projected_qkv[source_t * conv_dim + c] * w;
                     }
                 }
@@ -205,7 +208,7 @@ where
         let mut core = vec![0.0f32; value_dim];
         let mut projected = vec![0.0f32; self.hidden_size];
 
-        for t in 0..self.sequence_length {
+        for t in 0..active_len {
             core.fill(0.0);
 
             for value_head in 0..self.num_value_heads {
@@ -263,7 +266,8 @@ where
                     }
                 }
 
-                let rms = (head_out.iter().map(|v| v * v).sum::<f32>() / self.value_head_dim as f32
+                let rms = (head_out.iter().map(|v| v * v).sum::<f32>()
+                    / self.value_head_dim as f32
                     + self.rms_norm_eps)
                     .sqrt();
                 for vd in 0..self.value_head_dim {
@@ -277,7 +281,8 @@ where
                 let mut acc = 0.0f32;
                 for col in 0..value_dim {
                     unsafe {
-                        acc += core[col] * (*self.out_proj_ptr.ptr.add(out_dim * value_dim + col)).to_f32();
+                        acc += core[col]
+                            * (*self.out_proj_ptr.ptr.add(out_dim * value_dim + col)).to_f32();
                     }
                 }
                 projected[out_dim] = acc;
@@ -295,6 +300,21 @@ where
     }
 }
 
+fn active_prefix_len(
+    position_index: usize,
+    position_interval: usize,
+    sequence_length: usize,
+) -> Option<usize> {
+    if position_interval == 0 || sequence_length == 0 {
+        return None;
+    }
+
+    let active_len = position_index
+        .saturating_add(position_interval)
+        .min(sequence_length);
+    (active_len > 0).then_some(active_len)
+}
+
 unsafe fn matvec<T: Scalar>(
     input_ptr: *const T,
     weight_ptr: *const T,
@@ -305,8 +325,8 @@ unsafe fn matvec<T: Scalar>(
     for row in 0..output_dim {
         let mut acc = 0.0f32;
         for col in 0..input_dim {
-            acc += (*input_ptr.add(col)).to_f32()
-                * (*weight_ptr.add(row * input_dim + col)).to_f32();
+            acc +=
+                (*input_ptr.add(col)).to_f32() * (*weight_ptr.add(row * input_dim + col)).to_f32();
         }
         output[row] = acc;
     }

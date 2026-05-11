@@ -87,18 +87,28 @@ where
 {
     pub fn run(
         &self,
-        _position_index: usize,
-        _position_interval: usize,
-        _batch_size: usize,
+        position_index: usize,
+        position_interval: usize,
+        batch_size: usize,
         cpu_num: usize,
         thread_id: usize,
     ) {
-        let num_tokens = self.sequence_length * self.batch_size;
-        let Some((begin, end)) = crate::compiler::assign::assign(num_tokens, cpu_num, thread_id) else {
+        let Some(active_tokens) =
+            active_prefix_len(position_index, position_interval, self.sequence_length)
+        else {
+            return;
+        };
+        let batch_size = batch_size.min(self.batch_size);
+        let num_tokens = active_tokens * batch_size;
+        let Some((begin, end)) = crate::compiler::assign::assign(num_tokens, cpu_num, thread_id)
+        else {
             return;
         };
 
-        for token in begin..end {
+        for task in begin..end {
+            let position = task / batch_size;
+            let batch = task % batch_size;
+            let token = position * self.batch_size + batch;
             self.run_token(token);
         }
     }
@@ -202,9 +212,10 @@ where
             );
             matvec(
                 input.as_ptr(),
-                self.experts_gate_up_ptr
-                    .ptr
-                    .add(expert_id * expert_weight_stride + self.expert_intermediate_size * self.hidden_size),
+                self.experts_gate_up_ptr.ptr.add(
+                    expert_id * expert_weight_stride
+                        + self.expert_intermediate_size * self.hidden_size,
+                ),
                 &mut up,
                 self.expert_intermediate_size,
                 self.hidden_size,
@@ -284,6 +295,21 @@ where
     }
 }
 
+fn active_prefix_len(
+    position_index: usize,
+    position_interval: usize,
+    sequence_length: usize,
+) -> Option<usize> {
+    if position_interval == 0 || sequence_length == 0 {
+        return None;
+    }
+
+    let active_len = position_index
+        .saturating_add(position_interval)
+        .min(sequence_length);
+    (active_len > 0).then_some(active_len)
+}
+
 unsafe fn matvec<T: Scalar>(
     input_ptr: *const T,
     weight_ptr: *const T,
@@ -294,8 +320,8 @@ unsafe fn matvec<T: Scalar>(
     for row in 0..output_dim {
         let mut acc = 0.0f32;
         for col in 0..input_dim {
-            acc += (*input_ptr.add(col)).to_f32()
-                * (*weight_ptr.add(row * input_dim + col)).to_f32();
+            acc +=
+                (*input_ptr.add(col)).to_f32() * (*weight_ptr.add(row * input_dim + col)).to_f32();
         }
         output[row] = acc;
     }
