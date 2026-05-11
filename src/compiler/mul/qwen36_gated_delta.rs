@@ -1,29 +1,6 @@
-use std::f16;
-
 use crate::init::send_sync_ptr::{ConstPtr, MutPtr};
-use crate::kernel::generic::from_f32::FromF32;
 
-pub trait Scalar: Copy + Default + FromF32 {
-    fn to_f32(self) -> f32;
-}
-
-impl Scalar for f16 {
-    fn to_f32(self) -> f32 {
-        self as f32
-    }
-}
-
-impl Scalar for f32 {
-    fn to_f32(self) -> f32 {
-        self
-    }
-}
-
-impl Scalar for f64 {
-    fn to_f32(self) -> f32 {
-        self as f32
-    }
-}
+use super::qwen36_matvec::{matvec_f32_input_parallel, matvec_parallel, Scalar};
 
 #[derive(Clone)]
 pub struct Qwen36GatedDelta<T> {
@@ -126,17 +103,16 @@ where
             return;
         };
         let batch_size = batch_size.min(self.batch_size);
-        let Some((begin, end)) = crate::compiler::assign::assign(batch_size, cpu_num, thread_id)
-        else {
+        if thread_id != 0 {
             return;
-        };
+        }
 
-        for batch in begin..end {
-            self.run_batch(batch, active_len);
+        for batch in 0..batch_size {
+            self.run_batch(batch, active_len, cpu_num);
         }
     }
 
-    fn run_batch(&self, batch: usize, active_len: usize) {
+    fn run_batch(&self, batch: usize, active_len: usize, cpu_num: usize) {
         let key_dim = self.num_key_heads * self.key_head_dim;
         let value_dim = self.num_value_heads * self.value_head_dim;
         let conv_dim = key_dim * 2 + value_dim;
@@ -150,33 +126,37 @@ where
         for t in 0..active_len {
             let input_offset = (t * self.batch_size + batch) * self.hidden_size;
             unsafe {
-                matvec(
+                matvec_parallel(
                     self.input_ptr.ptr.add(input_offset),
                     self.in_proj_qkv_ptr.ptr,
                     &mut projected_qkv[t * conv_dim..(t + 1) * conv_dim],
                     conv_dim,
                     self.hidden_size,
+                    cpu_num,
                 );
-                matvec(
+                matvec_parallel(
                     self.input_ptr.ptr.add(input_offset),
                     self.in_proj_z_ptr.ptr,
                     &mut projected_z[t * value_dim..(t + 1) * value_dim],
                     value_dim,
                     self.hidden_size,
+                    cpu_num,
                 );
-                matvec(
+                matvec_parallel(
                     self.input_ptr.ptr.add(input_offset),
                     self.in_proj_b_ptr.ptr,
                     &mut projected_b[t * self.num_value_heads..(t + 1) * self.num_value_heads],
                     self.num_value_heads,
                     self.hidden_size,
+                    cpu_num,
                 );
-                matvec(
+                matvec_parallel(
                     self.input_ptr.ptr.add(input_offset),
                     self.in_proj_a_ptr.ptr,
                     &mut projected_a[t * self.num_value_heads..(t + 1) * self.num_value_heads],
                     self.num_value_heads,
                     self.hidden_size,
+                    cpu_num,
                 );
             }
         }
@@ -277,15 +257,15 @@ where
                 }
             }
 
-            for out_dim in 0..self.hidden_size {
-                let mut acc = 0.0f32;
-                for col in 0..value_dim {
-                    unsafe {
-                        acc += core[col]
-                            * (*self.out_proj_ptr.ptr.add(out_dim * value_dim + col)).to_f32();
-                    }
-                }
-                projected[out_dim] = acc;
+            unsafe {
+                matvec_f32_input_parallel(
+                    &core,
+                    self.out_proj_ptr.ptr,
+                    &mut projected,
+                    self.hidden_size,
+                    value_dim,
+                    cpu_num,
+                );
             }
 
             let output_offset = (t * self.batch_size + batch) * self.hidden_size;
@@ -313,23 +293,6 @@ fn active_prefix_len(
         .saturating_add(position_interval)
         .min(sequence_length);
     (active_len > 0).then_some(active_len)
-}
-
-unsafe fn matvec<T: Scalar>(
-    input_ptr: *const T,
-    weight_ptr: *const T,
-    output: &mut [f32],
-    output_dim: usize,
-    input_dim: usize,
-) {
-    for row in 0..output_dim {
-        let mut acc = 0.0f32;
-        for col in 0..input_dim {
-            acc +=
-                (*input_ptr.add(col)).to_f32() * (*weight_ptr.add(row * input_dim + col)).to_f32();
-        }
-        output[row] = acc;
-    }
 }
 
 fn l2_norm(values: &[f32]) -> Vec<f32> {

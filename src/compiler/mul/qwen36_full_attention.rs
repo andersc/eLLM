@@ -1,29 +1,6 @@
-use std::f16;
-
 use crate::init::send_sync_ptr::{ConstPtr, MutPtr};
-use crate::kernel::generic::from_f32::FromF32;
 
-pub trait Scalar: Copy + Default + FromF32 {
-    fn to_f32(self) -> f32;
-}
-
-impl Scalar for f16 {
-    fn to_f32(self) -> f32 {
-        self as f32
-    }
-}
-
-impl Scalar for f32 {
-    fn to_f32(self) -> f32 {
-        self
-    }
-}
-
-impl Scalar for f64 {
-    fn to_f32(self) -> f32 {
-        self as f32
-    }
-}
+use super::qwen36_matvec::{matvec_parallel, matvec_f32_input_parallel, Scalar};
 
 #[derive(Clone)]
 pub struct Qwen36FullAttention<T> {
@@ -113,17 +90,16 @@ where
             return;
         };
         let batch_size = batch_size.min(self.batch_size);
-        let Some((begin, end)) = crate::compiler::assign::assign(batch_size, cpu_num, thread_id)
-        else {
+        if thread_id != 0 {
             return;
-        };
+        }
 
-        for batch in begin..end {
-            self.run_batch(batch, active_len);
+        for batch in 0..batch_size {
+            self.run_batch(batch, active_len, cpu_num);
         }
     }
 
-    fn run_batch(&self, batch: usize, active_len: usize) {
+    fn run_batch(&self, batch: usize, active_len: usize, cpu_num: usize) {
         let q_dim = self.num_attention_heads * self.head_dim;
         let kv_dim = self.num_key_value_heads * self.head_dim;
         let groups = self.num_attention_heads / self.num_key_value_heads;
@@ -138,26 +114,29 @@ where
             let mut k_raw = vec![0.0f32; kv_dim];
             let mut v_raw = vec![0.0f32; kv_dim];
             unsafe {
-                matvec(
+                matvec_parallel(
                     self.input_ptr.ptr.add(input_offset),
                     self.q_proj_ptr.ptr,
                     &mut q_raw,
                     q_dim * 2,
                     self.hidden_size,
+                    cpu_num,
                 );
-                matvec(
+                matvec_parallel(
                     self.input_ptr.ptr.add(input_offset),
                     self.k_proj_ptr.ptr,
                     &mut k_raw,
                     kv_dim,
                     self.hidden_size,
+                    cpu_num,
                 );
-                matvec(
+                matvec_parallel(
                     self.input_ptr.ptr.add(input_offset),
                     self.v_proj_ptr.ptr,
                     &mut v_raw,
                     kv_dim,
                     self.hidden_size,
+                    cpu_num,
                 );
             }
 
@@ -224,15 +203,15 @@ where
                 }
             }
 
-            for out_dim in 0..self.hidden_size {
-                let mut acc = 0.0f32;
-                for col in 0..q_dim {
-                    unsafe {
-                        acc += attention_out[col]
-                            * (*self.o_proj_ptr.ptr.add(out_dim * q_dim + col)).to_f32();
-                    }
-                }
-                projected[out_dim] = acc;
+            unsafe {
+                matvec_f32_input_parallel(
+                    &attention_out,
+                    self.o_proj_ptr.ptr,
+                    &mut projected,
+                    self.hidden_size,
+                    q_dim,
+                    cpu_num,
+                );
             }
 
             let output_offset = (t * self.batch_size + batch) * self.hidden_size;
@@ -260,23 +239,6 @@ fn active_prefix_len(
         .saturating_add(position_interval)
         .min(sequence_length);
     (active_len > 0).then_some(active_len)
-}
-
-unsafe fn matvec<T: Scalar>(
-    input_ptr: *const T,
-    weight_ptr: *const T,
-    output: &mut [f32],
-    output_dim: usize,
-    input_dim: usize,
-) {
-    for row in 0..output_dim {
-        let mut acc = 0.0f32;
-        for col in 0..input_dim {
-            acc +=
-                (*input_ptr.add(col)).to_f32() * (*weight_ptr.add(row * input_dim + col)).to_f32();
-        }
-        output[row] = acc;
-    }
 }
 
 fn rms_norm_head<T: Scalar>(values: &mut [f32], weight_ptr: *const T, head_dim: usize, eps: f32) {

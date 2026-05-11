@@ -1,5 +1,6 @@
-use crate::compiler::mul::qwen36_full_attention::Scalar;
 use crate::init::send_sync_ptr::{ConstPtr, MutPtr};
+
+use super::qwen36_matvec::{matvec, matvec_f32_input, Scalar};
 
 #[derive(Clone)]
 pub struct Qwen36Moe<T> {
@@ -308,39 +309,6 @@ fn active_prefix_len(
         .saturating_add(position_interval)
         .min(sequence_length);
     (active_len > 0).then_some(active_len)
-}
-
-unsafe fn matvec<T: Scalar>(
-    input_ptr: *const T,
-    weight_ptr: *const T,
-    output: &mut [f32],
-    output_dim: usize,
-    input_dim: usize,
-) {
-    for row in 0..output_dim {
-        let mut acc = 0.0f32;
-        for col in 0..input_dim {
-            acc +=
-                (*input_ptr.add(col)).to_f32() * (*weight_ptr.add(row * input_dim + col)).to_f32();
-        }
-        output[row] = acc;
-    }
-}
-
-unsafe fn matvec_f32_input<T: Scalar>(
-    input: &[f32],
-    weight_ptr: *const T,
-    output: &mut [f32],
-    output_dim: usize,
-    input_dim: usize,
-) {
-    for row in 0..output_dim {
-        let mut acc = 0.0f32;
-        for col in 0..input_dim {
-            acc += input[col] * (*weight_ptr.add(row * input_dim + col)).to_f32();
-        }
-        output[row] = acc;
-    }
 }
 
 fn silu(value: f32) -> f32 {

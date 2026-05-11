@@ -71,8 +71,7 @@ where
         + Sigmoid<T>
         + Sqrt
         + FromF32
-        + super::mul::qwen36_full_attention::Scalar
-        + super::mul::qwen36_gated_delta::Scalar
+        + super::mul::qwen36_matvec::Scalar
         + AddAssign,
 {
     pub fn run(

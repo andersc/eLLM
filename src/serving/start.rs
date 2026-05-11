@@ -27,8 +27,7 @@ where
         + Sigmoid<T>
         + Sqrt
         + FromF32
-        + crate::compiler::mul::qwen36_full_attention::Scalar
-        + crate::compiler::mul::qwen36_gated_delta::Scalar
+        + crate::compiler::mul::qwen36_matvec::Scalar
         + AddAssign
         + Send
         + Sync

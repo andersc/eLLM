@@ -538,6 +538,14 @@ fn run_official_operator(
     cpu_num: usize,
 ) {
     let cpu_num = cpu_num.max(1);
+    if matches!(
+        operator,
+        Operator::Qwen36FullAttention(_) | Operator::Qwen36GatedDelta(_)
+    ) {
+        operator.run(position_index, position_interval, batch_size, cpu_num, 0);
+        return;
+    }
+
     let operator_batch = match operator {
         Operator::MatMulTopK(_) => position_interval.saturating_mul(batch_size),
         _ => batch_size,
